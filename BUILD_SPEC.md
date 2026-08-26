@@ -102,39 +102,48 @@ What exists:
 - A Python venv was created locally at `backend/.venv` (not committed;
   recreate with `python3 -m venv .venv && pip install -r requirements.txt`).
 
-**Why it's unverified:** the Claude Code cloud environment this was
-built in had its network access level set to "Trusted" (allowlist-only:
-npm/PyPI/GitHub/etc.), which blocks Yahoo Finance's domains entirely
-(`query1/query2.finance.yahoo.com`, `fc.yahoo.com`, `guce.yahoo.com`),
-as well as every alternative tried (Alpha Vantage, Polygon.io, Stooq,
-even Finviz — all 403'd at the proxy level). This was confirmed to be a
-blanket default-deny policy, not something specific to financial data
-sites (a control request to `example.com` also 403'd). The user has
-since been walked through changing the environment's Network access
-level to "Full" (or "Custom" with the Yahoo hosts allowlisted) via the
-environment edit dialog in claude.ai/code.
+**Stage 1 is now LIVE-VERIFIED (2026-08-26).** Network access to Yahoo
+Finance works in this environment, but getting real data required one
+code fix — documented here so it isn't rediscovered:
 
-**Next step for whoever picks this up:** confirm network access now
-works (try `curl -sS -o /dev/null -w '%{http_code}\n' https://query2.finance.yahoo.com/`
-or just run the verification below), then complete Stage 1 verification:
+**Bug found and fixed: yfinance's default TLS impersonation gets reset
+by this environment's egress proxy.** yfinance uses `curl_cffi` to
+impersonate a browser's TLS fingerprint (Yahoo blocks/rate-limits
+requests that don't look like a real browser — a plain, non-impersonated
+request gets a permanent HTTP 429). yfinance's hardcoded default is
+`impersonate="chrome"`. In this environment, Chrome impersonation's TLS
+ClientHello gets reset mid-handshake by the proxy (`curl: (35) Recv
+failure: Connection reset by peer`) — confirmed to be proxy-specific,
+not a Yahoo block, by testing other impersonation targets: `safari` and
+`edge` both pass through the proxy cleanly and return real data, only
+`chrome*` variants fail. Fix, in `backend/app/data_fetch.py`: build a
+single module-level `curl_cffi.requests.Session(impersonate="safari")`
+and pass it into every `yf.Ticker(ticker, session=...)` call instead of
+using yfinance's default session. If this project is ever run outside
+this proxied environment, that override is harmless (Safari
+impersonation is just as valid a browser fingerprint as Chrome for
+clearing Yahoo's bot check).
 
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python3 -c "
-from app.data_fetch import fetch_ohlcv
-for ticker in ['AAPL', 'TSLA', 'NVDA']:
-    for tf in ['1Y', '1M', '1D']:
-        df = fetch_ohlcv(ticker, tf)
-        print(ticker, tf, df.shape, df.index.is_monotonic_increasing, df.index.min(), df.index.max())
-        print(df.tail(3))
-"
-```
-Check: ascending index, no gaps/NaNs, sane OHLC ranges (e.g. AAPL not
-priced at $3 or $30,000), volume non-negative. Also test an invalid
-ticker (e.g. `ZZZZZZ`) to confirm `InvalidTickerError` fires cleanly.
-Once that's confirmed, report a short verification summary and move to
-Stage 2 (indicator calculations) per the Feedback Loop Protocol above.
-Remaining stages (indicators, pattern detection, frontend, summary
-generation, end-to-end test) have not been started yet.
+**Verification performed:**
+- Fetched `AAPL`, `TSLA`, `NVDA` across `1Y` (daily), `1M` (daily), and
+  `1D` (5-minute intraday) timeframes. All returned ascending-by-date,
+  gap-free, NaN-free DataFrames with strictly positive OHLC and
+  non-negative volume.
+- Sanity-checked prices against known ranges: AAPL ~$308-339, TSLA
+  ~$345-363, NVDA ~$208-215 — all plausible, no $3 or $30,000 garbage
+  values, no stale/duplicate bars.
+- Confirmed `InvalidTickerError` fires cleanly for a bogus ticker
+  (`ZZZZZZ`) instead of crashing or silently returning empty data.
+- Ran the actual FastAPI app end-to-end (not just the fetch function):
+  `GET /api/health` → `{"status":"ok"}`; `GET /api/ohlcv?ticker=AAPL&timeframe=1M`
+  → 200 with well-formed JSON bars; `GET /api/ohlcv?ticker=ZZZZZZ&timeframe=1M`
+  → clean 404 with a descriptive error body, no stack trace leaked.
+
+**Next step for whoever picks this up:** Stage 1 is done. Move to Stage
+2 (indicator calculations — SMA/EMA, RSI, MACD, Bollinger Bands, volume
+MA, support/resistance) per the Feedback Loop Protocol above: build the
+indicator module, then spot-check each computed value against a known
+reference (e.g. compare SMA/RSI against what a real charting site shows
+for the same ticker/date) before moving on. Remaining stages (pattern
+detection, frontend, summary generation, end-to-end test) have not been
+started yet.
