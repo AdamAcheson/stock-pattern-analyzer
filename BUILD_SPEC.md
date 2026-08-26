@@ -139,11 +139,72 @@ clearing Yahoo's bot check).
   → 200 with well-formed JSON bars; `GET /api/ohlcv?ticker=ZZZZZZ&timeframe=1M`
   → clean 404 with a descriptive error body, no stack trace leaked.
 
-**Next step for whoever picks this up:** Stage 1 is done. Move to Stage
-2 (indicator calculations — SMA/EMA, RSI, MACD, Bollinger Bands, volume
-MA, support/resistance) per the Feedback Loop Protocol above: build the
-indicator module, then spot-check each computed value against a known
-reference (e.g. compare SMA/RSI against what a real charting site shows
-for the same ticker/date) before moving on. Remaining stages (pattern
-detection, frontend, summary generation, end-to-end test) have not been
-started yet.
+**Stage 1 is done.**
+
+**Stage 2 — Indicator calculations: DONE, LIVE-VERIFIED (2026-08-26).**
+
+What exists:
+- `backend/app/indicators.py` — pure functions over a `fetch_ohlcv`
+  DataFrame: `sma`, `ema`, `rsi` (Wilder smoothing), `macd`, `bollinger_bands`,
+  `volume_weighted_ma`, `ma_crossovers` (golden/death cross via SMA50/SMA200
+  sign changes), `swing_highs_lows` and `support_resistance_levels`
+  (clustered swing points), plus `compute_all(df)` bundling everything.
+  Docstrings mark which calculations are precise textbook formulas (SMA,
+  EMA, MACD, Bollinger, VWMA) vs. heuristic judgment calls flagged for
+  review: RSI's smoothing convention (Wilder's, the market-standard
+  choice), the swing-high/low window (fixed at 5 bars each side — an
+  arbitrary trade-off between noise and sensitivity), and the
+  support/resistance clustering tolerance (1.5% merge threshold, "most
+  touched" used as a proxy for "most significant").
+- `backend/app/schemas.py` — added `IndicatorPoint`, `MACDPoint`,
+  `BollingerPoint`, `CrossEvent`, `SRLevel`, `IndicatorsResponse`.
+- `backend/app/main.py` — added `GET /api/indicators?ticker=...&timeframe=...`,
+  same error handling pattern as `/api/ohlcv` (404 for invalid ticker,
+  400 for unknown timeframe). NaN values (bars before a window has enough
+  history) serialize as JSON `null`, not `NaN` or a dropped key.
+- `backend/verify_stage2.py` — a standalone verification script (not a
+  pytest suite) that fetches real data and checks each indicator against
+  an independent from-scratch reference implementation (plain Python
+  loops, not a second call into pandas rolling/ewm) rather than just
+  re-running the same code. Kept in the repo so the check is
+  reproducible if `indicators.py` changes.
+
+**Verification performed** (`python3 verify_stage2.py`, AAPL/TSLA/MSFT,
+1Y daily):
+- SMA20/50/200, EMA12/26, RSI14, and VWMA20 all matched independent
+  plain-Python reference calculations to within floating-point
+  tolerance at the most recent bar.
+- RSI stayed within [0, 100] for every valid bar across all three
+  tickers (237 bars each).
+- MACD identities held exactly: `histogram == macd - signal` and
+  `macd == EMA12 - EMA26` for every valid bar.
+- Bollinger Bands: `upper >= middle >= lower` held for every valid bar,
+  and the middle band matched SMA20 exactly.
+- Golden/death cross detection was under-exercised on 1Y data (SMA200
+  only has ~51 valid bars in a 251-bar series, and none of AAPL/TSLA/MSFT
+  crossed in that window) — separately verified against 5 years of AAPL
+  daily data, which produced 4 golden crosses and 3 death crosses
+  (2022-09-26, 2023-03-22, 2024-06-13, 2025-09-15 golden; 2022-10-07,
+  2024-03-14, 2025-04-07 death). Each was confirmed mechanically: SMA50
+  was below (above) SMA200 on the prior bar and above (below) it on the
+  flagged bar, exactly matching what "golden"/"death" cross means — not
+  cross-checked against any external narrative of what happened in the
+  market on those dates.
+- Support/resistance levels for all three tickers fell within the
+  actual traded price range for the period (sanity bound — clustering
+  quality is inherently subjective and flagged as a heuristic above).
+- Ran the actual `GET /api/indicators` endpoint end-to-end: 200 with
+  well-formed JSON (including correct `null`s for early-bar NaNs) for a
+  valid ticker, clean 404 for an invalid one.
+
+**Next step for whoever picks this up:** Move to Stage 3 (pattern
+detection — head and shoulders, double top/bottom, triangles, flags/
+pennants; golden/death cross detection is already implemented in Stage 2
+and just needs surfacing to the frontend, not re-built) per the Feedback
+Loop Protocol above: build the detector(s), then test against
+tickers/date ranges with a known, visually obvious pattern before
+trusting them on arbitrary data — e.g. pull up a chart for the ticker on
+a real source and confirm the flagged date range actually looks like the
+claimed pattern before moving on. Remaining stages (pattern detection,
+frontend, summary generation, end-to-end test) have not been started
+yet.
