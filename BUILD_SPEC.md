@@ -566,11 +566,60 @@ against that overall lean.").
   panel's numbers match the indicator bar and chart above it, and that
   the fixed synthesis sentence reads cleanly with no stray parentheses.
 
-**Next step for whoever picks this up:** All five build stages are now
-done. The brief's final step is one full end-to-end test on a ticker not
-yet used anywhere in this build (AAPL, TSLA, NVDA, MSFT, AMZN, GOOGL,
-META, AMD, NFLX, DIS, BA, PLTR, COIN, and SOFI have all been used
-already) -- run it through the whole pipeline (data fetch -> indicators
--> patterns -> chart -> summary) and walk through what it outputs and
-why, per the brief's closing instruction, before calling the build
-done.
+**Stage 5 is done.**
+
+## Final end-to-end test (2026-08-27) — BUILD COMPLETE
+
+Ran the full pipeline on **JPM**, a ticker never touched anywhere else
+in this build (everything prior used AAPL, TSLA, NVDA, MSFT, AMZN,
+GOOGL, META, AMD, NFLX, DIS, BA, PLTR, COIN, or SOFI), across the whole
+stack in one pass: `fetch_ohlcv` -> `compute_all` -> `detect_all` ->
+`generate_summary` -> live FastAPI backend -> live React frontend in an
+actual browser.
+
+**Stage 1 (data):** 251 daily bars (1Y) and 78 five-minute bars (1D),
+both ascending, gap-free, NaN-free, prices in a sane $280-365 range for
+a large-cap bank stock; also spot-checked with 78 5-minute 1D bars
+(09:30-15:55) to confirm the intraday path still works for a ticker the
+data layer had never fetched before.
+
+**Stage 2 (indicators):** every value manually cross-checked against
+the raw indicator output -- last close $356.50, SMA20/50/200 =
+$357.65/$345.90/$314.57, RSI(14) = 54.3, MACD 3.10 vs. signal 4.68 --
+all self-consistent (e.g. price sits below its 20-day SMA but above its
+50- and 200-day, exactly as the numbers say); RSI stayed within [0,100],
+Bollinger ordering held.
+
+**Stage 3 (patterns):** 10 patterns detected (5 confirmed bullish, 2
+confirmed bearish, 3 still forming) -- that exact 5/2 split is what
+Stage 5's synthesis cites, confirmed by manually recounting the raw
+pattern list. Rendered the Double Bottom (confirmed, 2025-12 to 2026-01,
+neckline ~$332) and Double Top (forming, 2026-06 to 2026-07, neckline
+~$323) matches as charts: both show genuine, visually-recognizable W/M
+shapes with no competing extremum in between (the Stage 3 bug class
+this build already fixed once), and the Double Top correctly shows no
+confirmation line since price is still well above its neckline as of
+the latest bar.
+
+**Stage 4 (frontend):** loaded JPM fresh in a real browser (Playwright)
+end to end -- ticker input, timeframe buttons, chart with all overlays/
+volume/RSI/MACD panes, key-levels list, pattern cards, and the summary
+panel all rendered with zero `console.error`/`pageerror`. Every number
+visible in the UI (indicator bar, chart last-value label, pattern cards,
+summary text) matched the backend output exactly -- no drift between
+what was computed and what was displayed.
+
+**Stage 5 (summary):** synthesis correctly read "leans bullish overall
+... Note that momentum specifically reads bearish, cutting against that
+overall lean" -- trend and the confirmed-pattern majority both point up,
+MACD is the one dissenting factor, and the generator named it rather
+than averaging it away. This is the same kind of honest, non-boilerplate
+divergence-flagging verified on TSLA in Stage 5, now reproduced
+correctly on a ticker the summary generator had never seen.
+
+No bugs found in this pass -- everything held up on genuinely new data,
+which is the point of testing on an untouched ticker rather than
+re-running the same handful already used to build and debug each stage.
+
+**All five stages are built and live-verified against real market data.
+The project described in this file's Project Goal section is complete.**
