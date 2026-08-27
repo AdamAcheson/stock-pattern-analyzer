@@ -86,6 +86,18 @@ export interface PatternsResponse {
   patterns: PatternMatch[];
 }
 
+export interface SummaryResponse {
+  ticker: string;
+  timeframe: string;
+  headline: string;
+  trend: string;
+  momentum: string;
+  volatility: string;
+  patterns: string;
+  synthesis: string;
+  disclaimer: string;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -114,4 +126,8 @@ export function fetchIndicators(ticker: string, timeframe: Timeframe): Promise<I
 
 export function fetchPatterns(ticker: string, timeframe: Timeframe): Promise<PatternsResponse> {
   return getJson(`/api/patterns?ticker=${encodeURIComponent(ticker)}&timeframe=${timeframe}`);
+}
+
+export function fetchSummary(ticker: string, timeframe: Timeframe): Promise<SummaryResponse> {
+  return getJson(`/api/summary?ticker=${encodeURIComponent(ticker)}&timeframe=${timeframe}`);
 }

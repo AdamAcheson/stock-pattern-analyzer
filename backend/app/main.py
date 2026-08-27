@@ -19,7 +19,9 @@ from app.schemas import (
     PatternMatch,
     PatternsResponse,
     SRLevel,
+    SummaryResponse,
 )
+from app.summary import generate_summary
 from app.timeframes import TIMEFRAMES
 
 logging.basicConfig(level=logging.INFO)
@@ -209,4 +211,39 @@ def get_patterns(
             )
             for m in matches
         ],
+    )
+
+
+@app.get(
+    "/api/summary",
+    response_model=SummaryResponse,
+    responses={404: {"description": "Invalid ticker or no data"}},
+)
+def get_summary(
+    ticker: str = Query(..., min_length=1, max_length=10),
+    timeframe: str = Query("1Y"),
+) -> SummaryResponse:
+    if timeframe not in TIMEFRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown timeframe '{timeframe}'. Valid options: {sorted(TIMEFRAMES)}",
+        )
+
+    try:
+        df = fetch_ohlcv(ticker, timeframe)
+    except InvalidTickerError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    ind = compute_all(df)
+    matches = detect_all(df)
+    ticker_upper = ticker.strip().upper()
+
+    summary = generate_summary(ticker_upper, timeframe, df, ind, matches)
+
+    return SummaryResponse(
+        ticker=ticker_upper,
+        timeframe=timeframe,
+        **summary,
     )

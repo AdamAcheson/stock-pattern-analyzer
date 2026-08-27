@@ -3,23 +3,27 @@ import {
   fetchOhlcv,
   fetchIndicators,
   fetchPatterns,
+  fetchSummary,
   TIMEFRAMES,
   ApiError,
   type Timeframe,
   type OHLCVResponse,
   type IndicatorsResponse,
   type PatternsResponse,
+  type SummaryResponse,
 } from './lib/api';
 import StockChart from './components/StockChart';
 import PatternList from './components/PatternList';
 import ChartLegend from './components/ChartLegend';
 import KeyLevels from './components/KeyLevels';
+import SummaryPanel from './components/SummaryPanel';
 import './App.css';
 
 interface LoadedData {
   ohlcv: OHLCVResponse;
   indicators: IndicatorsResponse;
   patterns: PatternsResponse;
+  summary: SummaryResponse;
 }
 
 function lastValue(points: { value: number | null }[]): number | null {
@@ -42,10 +46,15 @@ function App() {
     setLoading(true);
     setError(null);
 
-    Promise.all([fetchOhlcv(ticker, timeframe), fetchIndicators(ticker, timeframe), fetchPatterns(ticker, timeframe)])
-      .then(([ohlcv, indicators, patterns]) => {
+    Promise.all([
+      fetchOhlcv(ticker, timeframe),
+      fetchIndicators(ticker, timeframe),
+      fetchPatterns(ticker, timeframe),
+      fetchSummary(ticker, timeframe),
+    ])
+      .then(([ohlcv, indicators, patterns, summary]) => {
         if (cancelled) return;
-        setData({ ohlcv, indicators, patterns });
+        setData({ ohlcv, indicators, patterns, summary });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -129,6 +138,10 @@ function App() {
           <section className="pattern-section">
             <h2>Detected Patterns</h2>
             <PatternList patterns={data.patterns.patterns} />
+          </section>
+
+          <section className="summary-section-wrapper">
+            <SummaryPanel summary={data.summary} />
           </section>
         </>
       )}

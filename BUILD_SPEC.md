@@ -479,18 +479,98 @@ not by reading the type signatures:
   `console.error` listeners) came back clean after the three fixes
   above, across every timeframe and both a valid and invalid ticker.
 
-**Next step for whoever picks this up:** Move to Stage 5 (summary
-generation) per the Feedback Loop Protocol above: synthesize the
-indicator values and detected patterns (including their
-`directional_bias`, `status`, and `volume_note` -- Stage 3's addendum
-added these specifically so the summary has real, hedged language to
-draw on instead of templated boilerplate) into a plain-English summary,
-explicitly labeled as analysis and not a recommendation per the project
-brief. Confirm the generated language actually matches what the data
-shows for a couple of different tickers/conditions (e.g. a ticker with a
-confirmed bullish pattern and rising RSI should read differently from
-one with a forming, unconfirmed bearish pattern) before trusting it
-generally. After that, the brief's final step is one full end-to-end
-test on a ticker not yet used anywhere in this build (AAPL, TSLA, NVDA,
-MSFT, AMZN, GOOGL, META, AMD, NFLX, DIS, BA, PLTR, COIN, and SOFI have
-all been used already).
+**Stage 4 is done.**
+
+**Stage 5 — Summary generation: DONE, LIVE-VERIFIED (2026-08-27).**
+
+What exists:
+- `backend/app/summary.py` — deterministic, rule-based plain-English
+  synthesis. This is NOT an LLM call; it's template logic that pulls
+  real numbers off the already-computed indicator/pattern data and
+  builds sentences around them, per the project brief's requirement to
+  "reference the specific indicator values and any detected patterns,
+  not generic boilerplate." Five sections plus a disclaimer:
+  - **Trend**: last close, % change over the window, price's position
+    relative to whichever SMAs have enough history (gracefully omits
+    SMA50/200 on short windows instead of crashing or lying about them),
+    and the SMA50-vs-SMA200 state described honestly as "the
+    configuration a golden/death cross *produces*" -- distinct from
+    claiming a cross just happened, which is a separate, date-stamped
+    claim only made when Stage 3's actual crossover detector fired.
+  - **Momentum**: RSI(14) value with its overbought/oversold/neutral
+    zone, MACD vs. its signal line.
+  - **Volatility**: price's position between the Bollinger Bands (or an
+    honest "not enough history" line instead of a fabricated number).
+  - **Patterns**: cites each detected pattern's name, directional bias,
+    confidence (mapped to low/moderate/high words), confirmed-vs-forming
+    status with the actual breakout date when confirmed, and its
+    volume_note -- reusing Stage 3's addendum fields verbatim rather
+    than re-deriving anything.
+  - **Synthesis**: tallies trend/momentum/confirmed-pattern-bias as
+    simple bullish/bearish "votes" and reports whether they agree or
+    conflict, naming which factor disagrees when the overall lean isn't
+    unanimous. Ties and "no clear signal" cases are stated as such, not
+    forced into a false lean. Always closes with "this is a description
+    of what the data currently shows, not a forecast" and a fixed
+    disclaimer paragraph (not financial advice, backward-looking,
+    patterns are imprecise) -- the project brief's most important
+    constraint, restated as one sentence per response.
+- `backend/app/schemas.py` / `backend/app/main.py` — added
+  `SummaryResponse`, `GET /api/summary?ticker=...&timeframe=...`.
+- `frontend/src/components/SummaryPanel.tsx` — renders the five sections
+  plus disclaimer; wired into `App.tsx` as a fourth parallel fetch
+  alongside ohlcv/indicators/patterns.
+
+**Bug found and fixed via direct inspection of the generated text:** the
+first draft of the synthesis sentence wrapped an already-parenthesized
+pattern count inside another pair of parens --
+`"...lean bullish (5 bullish, 0 bearish confirmed))."` -- a nested
+double-close-paren that reads like a typo. Also, the caveat clause for
+when momentum disagreed with the overall lean was outright broken
+grammar: `"though momentum, this is a description..."` with no verb.
+Neither was caught by just reading the code; both were caught by
+generating real output for multiple tickers and reading it as a user
+would. Fixed by restructuring the lean-statement to use a colon instead
+of nested parens, and rewriting the disagreement caveat as its own full
+sentence ("Note that momentum specifically reads bullish, cutting
+against that overall lean.").
+
+**Verification performed:**
+- Generated real summaries for AAPL, NVDA, COIN, TSLA, META (all 1Y) and
+  AAPL 1M/1D, and manually cross-checked every cited number (close,
+  SMA20/50/200, RSI, MACD/signal) against the raw indicator output --
+  all matched exactly, confirming the generator quotes real values
+  rather than paraphrasing or approximating them.
+- Confirmed the summary reads differently across genuinely different
+  conditions, per the Stage 4 handoff note's specific ask:
+  - **AAPL** (price above all three SMAs, MACD bullish, 5 confirmed
+    bullish patterns, 0 bearish) -> "signals lean bullish overall," no
+    disagreement caveat.
+  - **NVDA** (bullish trend, bearish MACD, confirmed patterns tied 4-4)
+    -> correctly detected as a true tie and reported as "mixed, not a
+    clean read in either direction," not forced toward either side.
+  - **TSLA** (price below a 50-day SMA that sits below the 200-day --
+    death-cross configuration -- but MACD had crossed above its own
+    signal line) -> "leans bearish overall... Note that momentum
+    specifically reads bullish, cutting against that overall lean" --
+    the exact kind of real, non-boilerplate divergence a human analyst
+    would flag, generated correctly from data the tool had never seen
+    tuned for.
+  - **AAPL 1D** (only a few hours of 5-minute bars, no SMA200) -> no
+    crash; trend logic fell back to SMA20 alone and produced a coherent,
+    correctly-labeled bearish read instead of erroring on missing data.
+- Ran the actual `GET /api/summary` endpoint end-to-end: 200 with
+  well-formed JSON for a valid ticker, clean 404 for an invalid one.
+- Rendered the full app in a browser (Playwright, same harness as
+  Stage 4) with the new Summary panel included; visually confirmed the
+  panel's numbers match the indicator bar and chart above it, and that
+  the fixed synthesis sentence reads cleanly with no stray parentheses.
+
+**Next step for whoever picks this up:** All five build stages are now
+done. The brief's final step is one full end-to-end test on a ticker not
+yet used anywhere in this build (AAPL, TSLA, NVDA, MSFT, AMZN, GOOGL,
+META, AMD, NFLX, DIS, BA, PLTR, COIN, and SOFI have all been used
+already) -- run it through the whole pipeline (data fetch -> indicators
+-> patterns -> chart -> summary) and walk through what it outputs and
+why, per the brief's closing instruction, before calling the build
+done.

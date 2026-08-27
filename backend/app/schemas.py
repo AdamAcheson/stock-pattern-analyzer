@@ -65,6 +65,18 @@ class PatternsResponse(BaseModel):
     patterns: list[PatternMatch]
 
 
+class SummaryResponse(BaseModel):
+    ticker: str
+    timeframe: str
+    headline: str
+    trend: str
+    momentum: str
+    volatility: str
+    patterns: str
+    synthesis: str
+    disclaimer: str
+
+
 class OHLCVBar(BaseModel):
     time: str  # ISO 8601 timestamp
     open: float
