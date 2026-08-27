@@ -74,23 +74,25 @@ configured in `backend/app/main.py`) rather than same-origin requests.
 After this one-time setup, every push to the connected branch
 auto-deploys both projects independently — no further manual steps.
 
-## Known risks
+## Known risks — both resolved (2026-08-27)
 
-- **`curl_cffi` on Vercel's build image — CONFIRMED WORKING (2026-08-27).**
-  `data_fetch.py` depends on yfinance's `curl_cffi` backend (see
-  BUILD_SPEC.md Stage 1), which ships precompiled native binaries rather
-  than being pure Python. This was flagged here as unverified until a
-  real deploy confirmed `app.main` (and everything it imports,
-  `data_fetch.py` included) loads successfully on Vercel's Python
-  runtime — the first real deploy returned a FastAPI-generated response
-  rather than an import-time crash, which only happens if every import
-  in that chain resolved.
-- **Function timeout — still unverified.** Vercel's Hobby-plan serverless
-  functions default to a 10-second execution limit. This app's yfinance
-  calls have been consistently fast in testing, but that testing
-  happened from this build environment's network, not Vercel's — if a
-  request to Yahoo Finance is ever slow from Vercel's infrastructure, an
-  API call could time out (504) rather than just running long. This
-  needs an endpoint that actually calls yfinance (e.g. `/api/ohlcv`) to
-  test, not just `/api/health`. Vercel's paid plans raise that limit if
-  it becomes a real problem.
+Both were flagged here as reasoned-about-but-unverified while this was
+built, since this environment has no way to deploy to Vercel directly.
+Both are now confirmed fine against a real deploy of the backend project
+(`https://backend-git-claude-stock-analyzer-e98002-adamachesons-projects.vercel.app`,
+the preview URL for this branch):
+
+- **`curl_cffi` on Vercel's build image.** `data_fetch.py` depends on
+  yfinance's `curl_cffi` backend (see BUILD_SPEC.md Stage 1), which
+  ships precompiled native binaries rather than being pure Python.
+  Confirmed working: `/api/health` returns a real FastAPI response,
+  which only happens if every import in that chain — `data_fetch.py`
+  included — resolved cleanly on Vercel's Python runtime.
+- **Function timeout.** Vercel's Hobby-plan serverless functions default
+  to a 10-second execution limit. Confirmed working: `/api/ohlcv?ticker=AAPL&timeframe=1M`
+  returned a complete 23-bar response (a real yfinance call, not just
+  the no-network `/api/health` check) well within that limit.
+
+Nothing to watch here anymore under normal conditions — if Yahoo
+Finance itself becomes slow at some point in the future, an occasional
+504 on a cold request is still possible, but the setup itself is sound.
