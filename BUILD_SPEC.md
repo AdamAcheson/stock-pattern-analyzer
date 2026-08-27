@@ -370,19 +370,127 @@ bias" is a factual description of the data, not a prediction.
   "Bullish Symmetrical Triangle" (prior 20 bars were rising) and
   correctly confirmed at the exact bar the synthetic breakout occurred.
 
-**Next step for whoever picks this up:** Move to Stage 4 (frontend chart
-rendering) per the Feedback Loop Protocol above: build the React +
-charting-library frontend against the three existing endpoints
-(`/api/ohlcv`, `/api/indicators`, `/api/patterns`), then confirm
-indicators and pattern flags actually align with the correct dates/
-prices on the rendered chart — the brief specifically calls out off-by-
-one errors here as common, so check bar alignment carefully (the
-backend's `_num_or_none` rounding and ISO-8601 `time` strings should
-make this straightforward, but timezone/date-boundary handling in
-whatever charting library gets used is worth double-checking). The
-frontend should surface `directional_bias`, `status`, and
-`confirmation_date` alongside each pattern, not just its name — a
-"Forming, unconfirmed" pattern and a "Confirmed" one are meaningfully
-different claims and the UI shouldn't flatten that distinction. Remaining
-stages (frontend, summary generation, end-to-end test) have not been
-started yet.
+**Stage 3 is done.**
+
+**Stage 4 — Frontend chart rendering: DONE, LIVE-VERIFIED (2026-08-27).**
+
+What exists:
+- `frontend/` — Vite + React + TypeScript, scaffolded fresh (`npm create
+  vite@latest frontend -- --template react-ts`), using `lightweight-charts`
+  (v5) for the chart. Default template boilerplate (hero images, the
+  vite/react logos, the leftover marketing CSS) was removed rather than
+  left in place.
+- `frontend/src/lib/api.ts` — typed fetch wrappers for all three backend
+  endpoints; types are hand-kept in sync with `backend/app/schemas.py`
+  (no shared schema generation in this project).
+- `frontend/src/lib/time.ts` — `isoToUtcSeconds`: converts the backend's
+  naive, exchange-local ISO timestamps into lightweight-charts'
+  `UTCTimestamp` by encoding the wall-clock components *as if* they were
+  UTC. This matters because lightweight-charts always displays
+  `UTCTimestamp` in UTC regardless of the viewer's browser timezone --
+  encoding it this way means every viewer sees the exact exchange-local
+  time the backend sent, with no timezone drift. (Documented as a
+  callout in the file since it's the kind of thing that looks wrong at a
+  glance but is deliberate.)
+- `frontend/src/components/StockChart.tsx` — one multi-pane chart:
+  candlesticks + SMA 20/50/200 + EMA 12/26 + Bollinger Bands + support/
+  resistance price lines + pattern markers on pane 0; volume + VWMA 20 on
+  pane 1; RSI 14 (+ 70/30 reference lines) on pane 2; MACD (line, signal,
+  histogram) on pane 3.
+- `frontend/src/components/ChartLegend.tsx`, `KeyLevels.tsx`,
+  `PatternList.tsx` — HTML/CSS companions to the canvas chart (see bugs
+  below for why the legend and key-levels list exist as separate DOM
+  elements rather than on-canvas labels).
+- `frontend/verify_frontend.mjs` — a Playwright script (kept as a
+  reusable check, `npm i -D playwright` was added for this) that loads
+  the app, exercises all seven timeframes' worth of screenshots, switches
+  ticker, and submits an invalid ticker, checking `console.error`/
+  `pageerror` at each step.
+
+**Three real bugs found by actually rendering this and looking at it,**
+not by reading the type signatures:
+
+1. **Axis label collision.** Every overlay series (SMA/EMA/Bollinger/
+   VWMA/MACD line/signal) was given a `title` for identification. In this
+   version of lightweight-charts, a non-empty `title` draws its own
+   always-visible price-scale label *independent of* `lastValueVisible`
+   (confirmed by isolating it: setting `lastValueVisible: false` alone
+   did nothing, setting `title: ''` made the label disappear). With 7
+   overlays plus 10 support/resistance price lines sharing one price
+   scale on a stock trading in a ~$100 range, the labels piled into an
+   unreadable stack overlapping the candles. Fixed by titling every
+   overlay `''` and moving identification into real DOM: `ChartLegend.tsx`
+   (color-swatch legend above the chart) and `KeyLevels.tsx` (a plain
+   text list of support/resistance prices and touch counts, more legible
+   than tiny stacked canvas labels ever were).
+2. **RSI pane looked compressed into a sliver.** Traced to two compounding
+   issues: (a) lightweight-charts auto-scales each pane's price axis to
+   the *visible data's* min/max, not a fixed range, so an RSI that spent
+   the whole window between 35-70 would stretch that range to fill the
+   pane, making the 70/30 reference lines land in misleading positions --
+   fixed with the documented `autoscaleInfoProvider` API, pinning the
+   scale to a true 0-100 range. (b) Separately, `pane.setHeight(...)` was
+   silently overridden by the chart's own layout pass -- requested pane
+   heights of `[420, 120, 90, 90]` came out as `[552, 27, 27, 83]` on
+   inspection. `pane.setStretchFactor(...)` (a persistent ratio, not a
+   one-off pixel value) is the API that actually sticks.
+3. **Locale-dependent console errors.** In the (locale-less, `LANG=`
+   empty) container used to run the Playwright check, lightweight-charts
+   threw "Invalid language tag: en-US@posix" on every label format call,
+   because it derives its default locale from the browser's language
+   settings and the browser's default in this environment was malformed.
+   Real end-user browsers have a valid default locale so this wouldn't
+   normally surface, but relying on an implicit, viewer-dependent locale
+   for a financial app's number/date formatting is fragile regardless --
+   fixed by passing an explicit `localization: { locale: 'en-US' }` to
+   `createChart`.
+
+**Verification performed:**
+- Ran the actual app in a headless browser (Playwright + the repo's
+  pre-installed Chromium) against the real FastAPI backend on
+  `localhost:8000` -- not a mocked API, the same live yfinance-backed
+  data used in Stages 1-3.
+- Checked `1D` (5-minute intraday): time axis correctly shows `HH:MM` in
+  exchange-local hours (10:00-15:45, matching a NYSE session), `SMA 200`
+  correctly reads "--" (not enough 5-minute bars in one day for a
+  200-period average -- exactly the expected Stage-2 warmup behavior,
+  not a bug), and RSI/MACD/volume panes all render proportionally.
+- Checked `1M` (23 daily bars): `SMA 50`/`SMA 200` correctly blank
+  (insufficient history), RSI line correctly only appears after its
+  14-bar warmup partway through the window, Bollinger Bands correctly
+  only draw over the last ~4 bars once a full 20-bar window exists --
+  all matching the exact warmup boundaries verified numerically in
+  Stage 2, now confirmed to render (not just compute) correctly.
+- Checked `3M`/`6M`/`1Y`/`5Y` render without console errors; switched
+  ticker from AAPL to NVDA mid-session and confirmed a full, correct
+  re-fetch and re-render (not stale data from the previous ticker).
+- Checked the invalid-ticker path end-to-end through the UI: typing
+  `ZZZZZZ` and submitting shows the exact backend error message
+  ("'ZZZZZZ' is not a recognized ticker symbol") with no crash and no
+  stale chart left behind.
+- Confirmed pattern markers are placed by matching the exact ISO
+  timestamp shared with the OHLCV series (via the same
+  `isoToUtcSeconds` conversion), not by array index or bar count --
+  structurally ruling out the classic off-by-one class of bug the
+  project brief specifically warns about, since there's no separate
+  position-counting path that could drift from the candles' own
+  placement.
+- `console --errors`-equivalent check (Playwright's `pageerror`/
+  `console.error` listeners) came back clean after the three fixes
+  above, across every timeframe and both a valid and invalid ticker.
+
+**Next step for whoever picks this up:** Move to Stage 5 (summary
+generation) per the Feedback Loop Protocol above: synthesize the
+indicator values and detected patterns (including their
+`directional_bias`, `status`, and `volume_note` -- Stage 3's addendum
+added these specifically so the summary has real, hedged language to
+draw on instead of templated boilerplate) into a plain-English summary,
+explicitly labeled as analysis and not a recommendation per the project
+brief. Confirm the generated language actually matches what the data
+shows for a couple of different tickers/conditions (e.g. a ticker with a
+confirmed bullish pattern and rising RSI should read differently from
+one with a forming, unconfirmed bearish pattern) before trusting it
+generally. After that, the brief's final step is one full end-to-end
+test on a ticker not yet used anywhere in this build (AAPL, TSLA, NVDA,
+MSFT, AMZN, GOOGL, META, AMD, NFLX, DIS, BA, PLTR, COIN, and SOFI have
+all been used already).
