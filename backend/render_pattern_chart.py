@@ -36,10 +36,13 @@ def render(ticker: str, timeframe: str, pattern_name: str, out_path: str, match_
                color="#16a34a", marker="^", s=40, zorder=5, label="Swing low")
 
     ax.axvspan(match["start"], match["end"], color="#facc15", alpha=0.25, label="Detected pattern range")
+    if match.get("confirmation_date") is not None:
+        ax.axvline(match["confirmation_date"], color="#16a34a", linestyle="--", linewidth=1.5, label="Confirmation breakout")
 
     ax.set_title(
-        f"{ticker} {timeframe} — {pattern_name} (confidence {match['confidence']:.2f})\n{match['detail']}",
-        fontsize=10,
+        f"{ticker} {timeframe} — {pattern_name} ({match['directional_bias']}, {match['status']}, confidence {match['confidence']:.2f})\n"
+        f"{match['detail']}\n{match['volume_note']}",
+        fontsize=9,
     )
     ax.legend(loc="best", fontsize=8)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))

@@ -16,6 +16,18 @@ thresholds (a peak pair 0.1% apart scores higher than one 2.9% apart
 against a 3% tolerance). Treat it as "how textbook does this look",
 not "how likely is this to play out".
 
+Directional bias, breakout-confirmation logic, and volume corroboration
+follow the definitions in the user-provided "Stock Chart Pattern
+Directional Reference Guide" (see BUILD_SPEC.md Stage 3 notes): a
+pattern's *shape* forming is not the same as it being *confirmed* --
+confirmation requires a close beyond the pattern's neckline/trendline/
+channel boundary, ideally on higher volume. None of this changes the
+fact that classical chart-pattern TA has weak, contested predictive
+power in the literature; it only makes the tool's language match how a
+technical analyst would actually describe a chart, per that document's
+own repeated caveat that patterns "describe a statistically probable
+direction, not certainty."
+
 All detectors take the OHLCV DataFrame from `app.data_fetch.fetch_ohlcv`
 and the swing-point table from `app.indicators.swing_highs_lows`.
 """
@@ -45,6 +57,10 @@ def _confidence(*margins: float) -> float:
     return round(_CONF_CEIL - avg_margin * (_CONF_CEIL - _CONF_FLOOR), 3)
 
 
+def _clamp_confidence(value: float) -> float:
+    return round(max(_CONF_FLOOR, min(_CONF_CEIL, value)), 3)
+
+
 def get_swing_points(df: pd.DataFrame, window: int = 5) -> list[dict]:
     """Flatten the swing_highs_lows boolean table into a time-ordered
     list of {pos, time, price, type} points, type in {"high", "low"}."""
@@ -59,6 +75,66 @@ def get_swing_points(df: pd.DataFrame, window: int = 5) -> list[dict]:
             points.append({"pos": pos, "time": idx, "price": float(df["low"].iloc[pos]), "type": "low"})
     points.sort(key=lambda p: p["pos"])
     return points
+
+
+def _find_breakout(df: pd.DataFrame, start_pos: int, level_at, direction: str) -> int | None:
+    """Scan forward from `start_pos` (inclusive) for the first bar whose
+    close breaks a level. `level_at(pos)` returns the level's price at a
+    given bar position (constant for a flat neckline/channel, or a
+    line-fit value for a sloped neckline/trendline). `direction` is
+    "above" or "below". Returns the breakout bar's position, or None if
+    no bar in the available data broke it yet (the pattern is still
+    "forming"/unconfirmed as of the most recent bar)."""
+    n = len(df)
+    closes = df["close"]
+    for pos in range(max(start_pos, 0), n):
+        level = level_at(pos)
+        close = closes.iloc[pos]
+        if direction == "above" and close > level:
+            return pos
+        if direction == "below" and close < level:
+            return pos
+    return None
+
+
+def _volume_note(df: pd.DataFrame, formation_start_pos: int, formation_end_pos: int, breakout_pos: int | None) -> tuple[str, float]:
+    """Compare breakout-bar volume to the pattern's average volume during
+    formation. The reference guide repeatedly cites "close beyond the
+    level, ideally on a volume increase" as part of confirmation -- this
+    makes that check explicit and reports it as a small, transparent
+    confidence nudge (+/-0.05) rather than folding it silently into the
+    shape-based confidence score."""
+    formation_start_pos = max(formation_start_pos, 0)
+    avg_vol = df["volume"].iloc[formation_start_pos : formation_end_pos + 1].mean()
+    if breakout_pos is None:
+        return "Not yet confirmed by a breakout close, so there's no breakout volume to check.", 0.0
+    if not avg_vol or avg_vol <= 0:
+        return "Volume data unavailable for this period.", 0.0
+    breakout_vol = df["volume"].iloc[breakout_pos]
+    ratio = breakout_vol / avg_vol
+    if ratio >= 1.2:
+        return f"Breakout volume was {ratio:.1f}x the pattern's average -- corroborates the move.", 0.05
+    if ratio <= 0.8:
+        return f"Breakout volume was only {ratio:.1f}x the pattern's average -- weak confirmation.", -0.05
+    return f"Breakout volume was {ratio:.1f}x the pattern's average -- unremarkable, no strong signal either way.", 0.0
+
+
+def _prior_trend_bias(df: pd.DataFrame, pos: int, lookback: int = 20, threshold_pct: float = 0.02) -> str:
+    """Was price trending up, down, or sideways in the `lookback` bars
+    immediately before `pos`? Used for patterns whose directional bias
+    depends on context rather than shape alone (symmetrical triangles,
+    per the reference guide: "breakout direction isn't guaranteed by the
+    shape alone -- context (prior trend) sets the bias"). Returns
+    "Bullish", "Bearish", or "Neutral"."""
+    start = max(0, pos - lookback)
+    if start >= pos:
+        return "Neutral"
+    change_pct = (df["close"].iloc[pos] - df["close"].iloc[start]) / df["close"].iloc[start]
+    if change_pct > threshold_pct:
+        return "Bullish"
+    if change_pct < -threshold_pct:
+        return "Bearish"
+    return "Neutral"
 
 
 def detect_double_top_bottom(
@@ -87,6 +163,12 @@ def detect_double_top_bottom(
     "match" on paper while looking nothing like an M-shaped double top
     (this was caught by rendering and eyeballing real matches during
     Stage 3 verification, see BUILD_SPEC.md).
+
+    Per the reference guide, confirmation is a close beyond the neckline
+    (the intermediate trough for a double top, peak for a double bottom)
+    -- checked here against every bar after the second peak/trough using
+    the actual data, not assumed. Directional bias is fixed by
+    definition (double top = Bearish, double bottom = Bullish).
     """
     if min_separation_bars is None:
         min_separation_bars = window * 2
@@ -118,17 +200,24 @@ def detect_double_top_bottom(
                 price_diff_pct / peak_tolerance_pct,
                 max(0.0, 1 - (depth_pct - min_trough_depth_pct) / min_trough_depth_pct),
             )
+            neckline_price = trough["price"]
+            breakout_pos = _find_breakout(df, h2["pos"] + 1, lambda p: neckline_price, "below")
+            volume_note, vol_adjust = _volume_note(df, h1["pos"], h2["pos"], breakout_pos)
             matches.append(
                 {
                     "name": "Double Top",
                     "start": h1["time"],
                     "end": h2["time"],
-                    "confidence": confidence,
+                    "confidence": _clamp_confidence(confidence + vol_adjust),
                     "detail": (
                         f"Peaks {h1['price']:.2f} ({h1['time'].date()}) and "
                         f"{h2['price']:.2f} ({h2['time'].date()}), {price_diff_pct:.1%} apart, "
                         f"trough {trough['price']:.2f} ({depth_pct:.1%} below peak average)"
                     ),
+                    "directional_bias": "Bearish",
+                    "status": "Confirmed" if breakout_pos is not None else "Forming",
+                    "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                    "volume_note": volume_note,
                 }
             )
             break  # nearest qualifying second peak only
@@ -155,17 +244,24 @@ def detect_double_top_bottom(
                 price_diff_pct / peak_tolerance_pct,
                 max(0.0, 1 - (height_pct - min_trough_depth_pct) / min_trough_depth_pct),
             )
+            neckline_price = peak["price"]
+            breakout_pos = _find_breakout(df, l2["pos"] + 1, lambda p: neckline_price, "above")
+            volume_note, vol_adjust = _volume_note(df, l1["pos"], l2["pos"], breakout_pos)
             matches.append(
                 {
                     "name": "Double Bottom",
                     "start": l1["time"],
                     "end": l2["time"],
-                    "confidence": confidence,
+                    "confidence": _clamp_confidence(confidence + vol_adjust),
                     "detail": (
                         f"Troughs {l1['price']:.2f} ({l1['time'].date()}) and "
                         f"{l2['price']:.2f} ({l2['time'].date()}), {price_diff_pct:.1%} apart, "
                         f"peak {peak['price']:.2f} ({height_pct:.1%} above trough average)"
                     ),
+                    "directional_bias": "Bullish",
+                    "status": "Confirmed" if breakout_pos is not None else "Forming",
+                    "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                    "volume_note": volume_note,
                 }
             )
             break
@@ -191,11 +287,22 @@ def detect_head_and_shoulders(
     shoulders. Only consecutive swing highs (with nothing in between) are
     considered for the three peaks/troughs, matching how the pattern is
     drawn visually.
+
+    Confirmation, per the reference guide, is a close beyond the neckline
+    connecting the two troughs (H&S) or two peaks (inverse H&S) between
+    the shoulders and head. The neckline is not assumed flat -- it's the
+    actual line through those two points, evaluated at each bar position.
     """
     points = get_swing_points(df, window=window)
     highs = [p for p in points if p["type"] == "high"]
     lows = [p for p in points if p["type"] == "low"]
     matches = []
+
+    def neckline_fn(p1: dict, p2: dict):
+        if p2["pos"] == p1["pos"]:
+            return lambda pos: p1["price"]
+        slope = (p2["price"] - p1["price"]) / (p2["pos"] - p1["pos"])
+        return lambda pos: p1["price"] + slope * (pos - p1["pos"])
 
     for i in range(len(highs) - 2):
         s1, head, s2 = highs[i], highs[i + 1], highs[i + 2]
@@ -221,18 +328,25 @@ def detect_head_and_shoulders(
             shoulder_diff_pct / shoulder_tolerance_pct,
             max(0.0, 1 - (prominence_pct - min_head_prominence_pct) / min_head_prominence_pct),
         )
+        level_at = neckline_fn(neckline[0], neckline[-1])
+        breakout_pos = _find_breakout(df, s2["pos"] + 1, level_at, "below")
+        volume_note, vol_adjust = _volume_note(df, s1["pos"], s2["pos"], breakout_pos)
         matches.append(
             {
                 "name": "Head and Shoulders",
                 "start": s1["time"],
                 "end": s2["time"],
-                "confidence": confidence,
+                "confidence": _clamp_confidence(confidence + vol_adjust),
                 "detail": (
                     f"Shoulders {s1['price']:.2f} ({s1['time'].date()}) / "
                     f"{s2['price']:.2f} ({s2['time'].date()}), "
                     f"head {head['price']:.2f} ({head['time'].date()}), "
                     f"{shoulder_diff_pct:.1%} shoulder difference"
                 ),
+                "directional_bias": "Bearish",
+                "status": "Confirmed" if breakout_pos is not None else "Forming",
+                "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                "volume_note": volume_note,
             }
         )
 
@@ -260,18 +374,25 @@ def detect_head_and_shoulders(
             shoulder_diff_pct / shoulder_tolerance_pct,
             max(0.0, 1 - (prominence_pct - min_head_prominence_pct) / min_head_prominence_pct),
         )
+        level_at = neckline_fn(neckline[0], neckline[-1])
+        breakout_pos = _find_breakout(df, s2["pos"] + 1, level_at, "above")
+        volume_note, vol_adjust = _volume_note(df, s1["pos"], s2["pos"], breakout_pos)
         matches.append(
             {
                 "name": "Inverse Head and Shoulders",
                 "start": s1["time"],
                 "end": s2["time"],
-                "confidence": confidence,
+                "confidence": _clamp_confidence(confidence + vol_adjust),
                 "detail": (
                     f"Shoulders {s1['price']:.2f} ({s1['time'].date()}) / "
                     f"{s2['price']:.2f} ({s2['time'].date()}), "
                     f"head {head['price']:.2f} ({head['time'].date()}), "
                     f"{shoulder_diff_pct:.1%} shoulder difference"
                 ),
+                "directional_bias": "Bullish",
+                "status": "Confirmed" if breakout_pos is not None else "Forming",
+                "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                "volume_note": volume_note,
             }
         )
 
@@ -303,6 +424,23 @@ def detect_triangles(
     triangles that formed and completed earlier in the series --
     exhaustively scanning every possible window for historical triangles
     was judged out of scope for an MVP pattern scanner.
+
+    Directional bias: ascending = Bullish, descending = Bearish (the
+    reference guide's "typical" reading for these -- it notes both can
+    occasionally act as reversals in the opposite context, which this
+    detector doesn't attempt to distinguish). Symmetrical triangles have
+    no inherent bias by shape alone per the guide -- "context (prior
+    trend) sets the bias" -- so bias is derived from the 20-bar trend
+    immediately before the triangle started (`_prior_trend_bias`); if
+    that's ambiguous, bias stays "Neutral" and confirmation is checked
+    against whichever trendline breaks first, with the bias assigned
+    retroactively from the breakout direction (mirroring how the guide
+    treats its neutral/bilateral patterns).
+
+    Confirmation is a close beyond the *actual fitted trendline's*
+    extrapolated value at that bar (not a flat snapshot of the swing
+    prices), matching how a real ascending/descending resistance or
+    support line moves over time.
     """
     if len(df) < lookback_bars:
         return []
@@ -316,8 +454,12 @@ def detect_triangles(
         return []
 
     avg_price = float(df["close"].iloc[recent_start_pos:].mean())
-    high_slope = np.polyfit([p["pos"] for p in highs], [p["price"] for p in highs], 1)[0] / avg_price
-    low_slope = np.polyfit([p["pos"] for p in lows], [p["price"] for p in lows], 1)[0] / avg_price
+    high_fit = np.polyfit([p["pos"] for p in highs], [p["price"] for p in highs], 1)
+    low_fit = np.polyfit([p["pos"] for p in lows], [p["price"] for p in lows], 1)
+    high_slope = high_fit[0] / avg_price
+    low_slope = low_fit[0] / avg_price
+    resistance_at = lambda pos: high_fit[0] * pos + high_fit[1]
+    support_at = lambda pos: low_fit[0] * pos + low_fit[1]
 
     high_flat = abs(high_slope) < flat_slope_threshold
     low_flat = abs(low_slope) < flat_slope_threshold
@@ -332,9 +474,9 @@ def detect_triangles(
         return []
 
     start = min(highs[0]["time"], lows[0]["time"])
-    end = max(highs[-1]["time"], lows[-1]["time"])
-    # Confidence grows with how far the sloped line(s) exceed the flat
-    # threshold and how flat the flat line(s) are, capped at 3x threshold.
+    end_pos = max(highs[-1]["pos"], lows[-1]["pos"])
+    end = df.index[end_pos]
+
     def slope_margin(slope, want_flat):
         if want_flat:
             return abs(slope) / flat_slope_threshold
@@ -342,21 +484,43 @@ def detect_triangles(
 
     if name == "Ascending Triangle":
         confidence = _confidence(slope_margin(high_slope, True), slope_margin(low_slope, False))
+        bias = "Bullish"
+        breakout_pos = _find_breakout(df, end_pos + 1, resistance_at, "above")
     elif name == "Descending Triangle":
         confidence = _confidence(slope_margin(high_slope, False), slope_margin(low_slope, True))
+        bias = "Bearish"
+        breakout_pos = _find_breakout(df, end_pos + 1, support_at, "below")
     else:
         confidence = _confidence(slope_margin(high_slope, False), slope_margin(low_slope, False))
+        bias = _prior_trend_bias(df, recent_start_pos)
+        up_break = _find_breakout(df, end_pos + 1, resistance_at, "above")
+        down_break = _find_breakout(df, end_pos + 1, support_at, "below")
+        if up_break is not None and (down_break is None or up_break <= down_break):
+            breakout_pos, bias = up_break, "Bullish"
+            name = "Bullish Symmetrical Triangle"
+        elif down_break is not None:
+            breakout_pos, bias = down_break, "Bearish"
+            name = "Bearish Symmetrical Triangle"
+        else:
+            breakout_pos = None
+            name = f"{bias} Symmetrical Triangle" if bias != "Neutral" else "Symmetrical Triangle"
+
+    volume_note, vol_adjust = _volume_note(df, recent_start_pos, end_pos, breakout_pos)
 
     return [
         {
             "name": name,
             "start": start,
             "end": end,
-            "confidence": confidence,
+            "confidence": _clamp_confidence(confidence + vol_adjust),
             "detail": (
                 f"Resistance slope {high_slope * 100:.3f}%/bar, "
                 f"support slope {low_slope * 100:.3f}%/bar over last {lookback_bars} bars"
             ),
+            "directional_bias": bias,
+            "status": "Confirmed" if breakout_pos is not None else "Forming",
+            "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+            "volume_note": volume_note,
         }
     ]
 
@@ -383,6 +547,10 @@ def detect_flags_pennants(
     single strongest (largest |move|) pole ending in any given
     `pole_window`-bar span is kept, to avoid reporting near-duplicates of
     the same visual move.
+
+    Directional bias matches the pole direction (Bull* = Bullish, Bear* =
+    Bearish). Confirmation, per the reference guide, is a close beyond
+    the consolidation's own high/low channel in the pole's direction.
     """
     n = len(df)
     closes = df["close"].to_numpy()
@@ -419,7 +587,10 @@ def detect_flags_pennants(
                 "cons_end": pole_end + consolidation_window - 1,
                 "pole_change_pct": pole_change_pct,
                 "cons_range_pct": cons_range_pct,
+                "cons_high": float(cons_highs.max()),
+                "cons_low": float(cons_lows.min()),
                 "name": f"{direction} {shape}",
+                "bias": "Bullish" if direction == "Bull" else "Bearish",
             }
         )
 
@@ -437,16 +608,25 @@ def detect_flags_pennants(
             max(0.0, 1 - (abs(c["pole_change_pct"]) - min_pole_move_pct) / min_pole_move_pct),
             c["cons_range_pct"] / max_consolidation_range_pct,
         )
+        if c["bias"] == "Bullish":
+            breakout_pos = _find_breakout(df, c["cons_end"] + 1, lambda p: c["cons_high"], "above")
+        else:
+            breakout_pos = _find_breakout(df, c["cons_end"] + 1, lambda p: c["cons_low"], "below")
+        volume_note, vol_adjust = _volume_note(df, c["pole_end"], c["cons_end"], breakout_pos)
         matches.append(
             {
                 "name": c["name"],
                 "start": df.index[c["pole_start"]],
                 "end": df.index[c["cons_end"]],
-                "confidence": confidence,
+                "confidence": _clamp_confidence(confidence + vol_adjust),
                 "detail": (
                     f"Pole move {c['pole_change_pct']:.1%} over {pole_window} bars, "
                     f"consolidation range {c['cons_range_pct']:.1%}"
                 ),
+                "directional_bias": c["bias"],
+                "status": "Confirmed" if breakout_pos is not None else "Forming",
+                "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                "volume_note": volume_note,
             }
         )
     return matches
@@ -458,6 +638,11 @@ def detect_ma_crossovers(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> l
     shape as the other detectors, so the API and frontend can treat all
     detected patterns uniformly. These are exact crossings of computed
     SMAs, not a fuzzy shape match, so confidence is fixed at the ceiling.
+    The crossover itself IS the event (there's no separate "shape" to
+    later confirm), so status is always "Confirmed". This pattern isn't
+    in the reference guide at all -- it's a moving-average signal, not a
+    price-shape pattern -- so there's no volume-corroboration convention
+    to apply here.
     """
     crosses = ma_crossovers(df, fast=fast, slow=slow)
     matches = []
@@ -469,6 +654,10 @@ def detect_ma_crossovers(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> l
                 "end": idx,
                 "confidence": _CONF_CEIL,
                 "detail": f"SMA{fast} crossed above SMA{slow} on {idx.date()}",
+                "directional_bias": "Bullish",
+                "status": "Confirmed",
+                "confirmation_date": idx,
+                "volume_note": "Not applicable -- a moving-average crossover, not a price-shape pattern.",
             }
         )
     for idx in crosses.index[crosses["death_cross"]]:
@@ -479,6 +668,10 @@ def detect_ma_crossovers(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> l
                 "end": idx,
                 "confidence": _CONF_CEIL,
                 "detail": f"SMA{fast} crossed below SMA{slow} on {idx.date()}",
+                "directional_bias": "Bearish",
+                "status": "Confirmed",
+                "confirmation_date": idx,
+                "volume_note": "Not applicable -- a moving-average crossover, not a price-shape pattern.",
             }
         )
     return matches

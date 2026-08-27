@@ -53,6 +53,10 @@ class PatternMatch(BaseModel):
     end: str
     confidence: float
     detail: str
+    directional_bias: str  # "Bullish" | "Bearish" | "Neutral"
+    status: str  # "Confirmed" | "Forming"
+    confirmation_date: str | None
+    volume_note: str
 
 
 class PatternsResponse(BaseModel):

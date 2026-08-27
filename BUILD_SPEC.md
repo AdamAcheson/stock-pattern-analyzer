@@ -293,6 +293,83 @@ rather than a bug to fix: tightening the thresholds further to exclude
 it risks also excluding genuine, tighter H&S patterns elsewhere. Flagged
 here rather than silently tuned away.
 
+**Stage 3 addendum — directional bias, confirmation, and volume,
+sourced from a user-provided reference document (2026-08-27).**
+
+The user supplied a "Stock Chart Pattern Directional Reference Guide"
+(23 patterns, confirmation criteria, invalidation criteria, and a
+directional-bias label per pattern) partway through Stage 3, asked how
+it compared to what was already built, and then asked for it to be
+folded in. It was NOT used to build the original Stage 3 detectors —
+those came from the project brief plus standard TA definitions — so
+this was a genuine retrofit, done and re-verified against live data
+before moving on. Comparison against the doc found the shape logic
+already matched (double top/bottom's neckline structure, head &
+shoulders' shoulder/head/neckline structure, triangle slope logic,
+flag/pennant flagpole+consolidation structure all lined up), but three
+things the doc treats as central were missing entirely: a directional
+label, breakout confirmation, and volume corroboration. Added to
+`pattern_detection.py`:
+- **`directional_bias`** ("Bullish"/"Bearish"/"Neutral") on every match.
+  Fixed by pattern identity for most (double top/H&S = Bearish, double
+  bottom/inverse H&S = Bullish, ascending triangle/bull flag/pennant =
+  Bullish, descending triangle/bear flag/pennant = Bearish), except
+  symmetrical triangles, which the doc explicitly says have no bias from
+  shape alone — bias there is derived from the 20-bar price trend
+  *before* the triangle formed (`_prior_trend_bias`), and the pattern is
+  renamed "Bullish/Bearish Symmetrical Triangle" once a bias is known,
+  matching the doc's own naming split. If price actually breaks out
+  before a prior trend gives a clear read, the breakout direction wins
+  over the prior-trend guess (mirroring how the doc treats its
+  neutral/bilateral patterns: "the breakout direction is the signal").
+- **`status`** ("Confirmed"/"Forming") and **`confirmation_date`**. The
+  doc is explicit that "confirmation matters more than the shape" — a
+  completed M/W or shoulder-head-shoulder shape is not yet a breakout.
+  `_find_breakout` scans every bar after the pattern's defining points
+  for the first close beyond the actual neckline/trendline/channel
+  level (a real fitted line for sloped necklines and triangle
+  trendlines, not a flat snapshot), and reports the exact date it broke,
+  or `None` if it hasn't yet.
+- **`volume_note`** plus a small transparent confidence nudge (±0.05,
+  clamped back into [0.3, 0.9]): compares breakout-bar volume to the
+  pattern's average volume during formation, since the doc repeatedly
+  cites "close beyond the level, ideally on a volume increase" as part
+  of confirmation. This is reported as an auditable ratio in plain
+  English, not folded silently into the base confidence score.
+- Golden/death cross (not in the reference doc at all — it's a
+  moving-average signal, not a price-shape pattern) got bias fields for
+  API consistency but `status` is trivially always "Confirmed" (the
+  crossover IS the event) and `volume_note` says the concept doesn't
+  apply.
+
+**Important scope note, restated from the earlier chat discussion:**
+none of this makes the tool's directional read more *accurate* — chart-
+pattern TA has weak, contested predictive power in the literature, and
+the reference doc itself hedges throughout ("statistically probable
+direction, not certainty," "one input, not a standalone signal"). This
+change makes the tool's output match how a technical analyst actually
+talks about a chart (shape vs. confirmed breakout vs. volume behind it),
+not how *likely* that breakout is to hold. Stage 5's summary language
+needs to preserve that same hedge — "double bottom, confirmed, bullish
+bias" is a factual description of the data, not a prediction.
+
+**Re-verification after the addendum:**
+- Re-ran `scan_patterns.py` across all 14 tickers/3 timeframes — same
+  match counts and shapes as before (the addendum only adds fields, it
+  doesn't change which shapes qualify), confirming no regression.
+- Re-rendered three charts with the new confirmation date marked as a
+  vertical line: NVDA Double Top (correctly still "Forming" — price
+  hasn't closed back below the ~190 neckline as of the last bar, so no
+  confirmation line is drawn), GOOGL Double Bottom (confirmed exactly
+  where price closes above the ~348 neckline peak), and PLTR Ascending
+  Triangle (confirmed exactly at the sharp breakout above resistance,
+  with volume 4.4x the pattern's average — a clean, textbook example of
+  everything working together correctly).
+- Verified the symmetrical-triangle bias/confirmation logic on a
+  synthetic converging series with a forced breakout: correctly labeled
+  "Bullish Symmetrical Triangle" (prior 20 bars were rising) and
+  correctly confirmed at the exact bar the synthetic breakout occurred.
+
 **Next step for whoever picks this up:** Move to Stage 4 (frontend chart
 rendering) per the Feedback Loop Protocol above: build the React +
 charting-library frontend against the three existing endpoints
@@ -302,6 +379,10 @@ prices on the rendered chart — the brief specifically calls out off-by-
 one errors here as common, so check bar alignment carefully (the
 backend's `_num_or_none` rounding and ISO-8601 `time` strings should
 make this straightforward, but timezone/date-boundary handling in
-whatever charting library gets used is worth double-checking).
-Remaining stages (frontend, summary generation, end-to-end test) have
-not been started yet.
+whatever charting library gets used is worth double-checking). The
+frontend should surface `directional_bias`, `status`, and
+`confirmation_date` alongside each pattern, not just its name — a
+"Forming, unconfirmed" pattern and a "Confirmed" one are meaningfully
+different claims and the UI shouldn't flatten that distinction. Remaining
+stages (frontend, summary generation, end-to-end test) have not been
+started yet.

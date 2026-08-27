@@ -202,6 +202,10 @@ def get_patterns(
                 end=m["end"].isoformat(),
                 confidence=m["confidence"],
                 detail=m["detail"],
+                directional_bias=m["directional_bias"],
+                status=m["status"],
+                confirmation_date=m["confirmation_date"].isoformat() if m["confirmation_date"] is not None else None,
+                volume_note=m["volume_note"],
             )
             for m in matches
         ],
