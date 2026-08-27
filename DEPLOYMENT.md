@@ -16,11 +16,16 @@ configured in `backend/app/main.py`) rather than same-origin requests.
 ## What's already in the repo
 
 - `backend/api/index.py` — the Vercel Python serverless function
-  entrypoint. It just imports the existing FastAPI `app`; every route
-  keeps its real path (e.g. `/api/ohlcv`) since `backend/vercel.json`'s
-  catch-all rewrite forwards every request to this one function and lets
-  FastAPI's own router dispatch it.
-- `backend/vercel.json` — the catch-all rewrite described above.
+  entrypoint. It just imports the existing FastAPI `app`; a single
+  `api/index.py` exporting an ASGI app is Vercel's zero-config catch-all
+  for everything under `/api/*`, receiving the real incoming path as-is,
+  so every route keeps working exactly as declared (e.g. `/api/ohlcv`)
+  with no rewrite or re-declaration needed. (An earlier version of this
+  file shipped with a `backend/vercel.json` rewrite that overwrote every
+  request's path with a fixed string, breaking every route — caught by
+  testing a real deploy and seeing FastAPI's own 404 come back for
+  every single path. Removed; there's no `vercel.json` in `backend/`
+  anymore.)
 - `backend/requirements.txt` — trimmed to only what the app imports
   (matplotlib, used solely by the dev-only `render_pattern_chart.py`
   verification script, moved to `backend/requirements-dev.txt` so it
@@ -44,12 +49,12 @@ configured in `backend/app/main.py`) rather than same-origin requests.
    auto-detect it as a Python project from `requirements.txt`; no
    framework preset or build command should be needed.
 2. **Verify it.** Once deployed, hit `https://<backend-project>.vercel.app/api/health`
-   in a browser — it should return `{"status":"ok"}`. If instead you get
-   a 404, the rewrite destination in `backend/vercel.json` (`/api/index`)
-   may need to change to `/api` — Vercel's exact function-naming
-   convention for an `api/index.py` file wasn't something I could verify
-   without a live deploy, so this is the one part of this setup most
-   likely to need a one-line tweak after the first real deploy.
+   in a browser — it should return `{"status":"ok"}`. Note that Vercel's
+   preview deployments (anything not on the production branch) require
+   you to be logged into Vercel to view them at all — an unauthenticated
+   request gets redirected rather than seeing the app's response, which
+   isn't a bug, just Deployment Protection. Test from a browser tab
+   where you're already logged in.
 3. **Deploy the frontend.** Add New → Project → import the same repo
    again → set **Root Directory** to `frontend` this time → Vercel
    should auto-detect Vite → deploy.
@@ -69,26 +74,23 @@ configured in `backend/app/main.py`) rather than same-origin requests.
 After this one-time setup, every push to the connected branch
 auto-deploys both projects independently — no further manual steps.
 
-## Known risks worth watching after the first deploy
+## Known risks
 
-Two things here were reasoned about carefully but not verified against
-real Vercel infrastructure, since this build environment has no way to
-deploy to Vercel and test it directly:
-
-- **Function timeout.** Vercel's Hobby-plan serverless functions default
-  to a 10-second execution limit. This app's yfinance calls have been
-  consistently fast in testing, but that testing happened from this
-  build environment's network, not Vercel's — if a request to Yahoo
-  Finance is ever slow from Vercel's infrastructure, an API call could
-  time out (504) rather than just running long. Vercel's paid plans
-  raise that limit if it becomes a real problem.
-- **`curl_cffi` on Vercel's build image.** `data_fetch.py` depends on
-  yfinance's `curl_cffi` backend (see BUILD_SPEC.md Stage 1 — it's what
-  lets requests get through as a real browser TLS fingerprint instead of
-  being blocked by Yahoo). `curl_cffi` ships precompiled native binaries
-  per platform rather than being pure Python; it publishes Linux x86_64
-  wheels so `pip install` on Vercel's build machine should pick up a
-  compatible one, but that's an expectation based on how the package is
-  distributed, not something confirmed by an actual deploy. If the
-  backend's `/api/health` works but every other endpoint 500s, check the
-  function logs for an import or native-library error here first.
+- **`curl_cffi` on Vercel's build image — CONFIRMED WORKING (2026-08-27).**
+  `data_fetch.py` depends on yfinance's `curl_cffi` backend (see
+  BUILD_SPEC.md Stage 1), which ships precompiled native binaries rather
+  than being pure Python. This was flagged here as unverified until a
+  real deploy confirmed `app.main` (and everything it imports,
+  `data_fetch.py` included) loads successfully on Vercel's Python
+  runtime — the first real deploy returned a FastAPI-generated response
+  rather than an import-time crash, which only happens if every import
+  in that chain resolved.
+- **Function timeout — still unverified.** Vercel's Hobby-plan serverless
+  functions default to a 10-second execution limit. This app's yfinance
+  calls have been consistently fast in testing, but that testing
+  happened from this build environment's network, not Vercel's — if a
+  request to Yahoo Finance is ever slow from Vercel's infrastructure, an
+  API call could time out (504) rather than just running long. This
+  needs an endpoint that actually calls yfinance (e.g. `/api/ohlcv`) to
+  test, not just `/api/health`. Vercel's paid plans raise that limit if
+  it becomes a real problem.

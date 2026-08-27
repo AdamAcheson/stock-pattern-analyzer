@@ -1,11 +1,13 @@
 """Vercel Python serverless function entrypoint.
 
-Vercel auto-detects any file under api/ that exports an ASGI app named
-`app` and serves it as a serverless function. Every route in
-app.main is already declared with its full path (e.g. "/api/ohlcv"),
-so vercel.json's catch-all rewrite forwards every request straight to
-this one function, and FastAPI's own router does the rest -- no route
-re-declaration needed here.
+A single file at api/index.py exporting an ASGI `app` is Vercel's
+zero-config catch-all for every request under /api/* -- it receives the
+real incoming path (e.g. "/api/ohlcv") as-is, and FastAPI's own router
+dispatches from there. No vercel.json is needed for this: an earlier
+version of this file added a custom rewrite to "/api/index", which
+overwrote every request's path with that literal string before FastAPI
+ever saw it, so every route 404'd against a path nothing was registered
+at. Caught by testing an actual deploy, not by re-reading the config.
 """
 
 from app.main import app  # noqa: F401
