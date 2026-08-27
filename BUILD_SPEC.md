@@ -197,14 +197,111 @@ What exists:
   well-formed JSON (including correct `null`s for early-bar NaNs) for a
   valid ticker, clean 404 for an invalid one.
 
-**Next step for whoever picks this up:** Move to Stage 3 (pattern
-detection — head and shoulders, double top/bottom, triangles, flags/
-pennants; golden/death cross detection is already implemented in Stage 2
-and just needs surfacing to the frontend, not re-built) per the Feedback
-Loop Protocol above: build the detector(s), then test against
-tickers/date ranges with a known, visually obvious pattern before
-trusting them on arbitrary data — e.g. pull up a chart for the ticker on
-a real source and confirm the flagged date range actually looks like the
-claimed pattern before moving on. Remaining stages (pattern detection,
-frontend, summary generation, end-to-end test) have not been started
-yet.
+**Stage 2 is done.**
+
+**Stage 3 — Pattern detection: DONE, LIVE-VERIFIED (2026-08-27).**
+
+What exists:
+- `backend/app/pattern_detection.py` — heuristic detectors for double
+  top/bottom, head and shoulders/inverse, ascending/descending/
+  symmetrical triangles, and bull/bear flags/pennants, plus a thin
+  wrapper around Stage 2's `ma_crossovers` for golden/death cross. Every
+  match is a dict with `name`, `start`, `end`, a `confidence` float
+  deliberately compressed into [0.3, 0.9] (never claims certainty), and
+  a human-readable `detail` string citing the actual prices/dates
+  involved. `detect_all(df)` runs every detector and applies
+  `_suppress_overlaps` (see below). Every threshold (peak-similarity
+  tolerance, trough depth, shoulder tolerance, triangle flatness, pole
+  size, consolidation tightness, swing window) is a documented
+  assumption in the relevant docstring, per the project brief's
+  requirement to flag judgment calls for review.
+- `backend/app/schemas.py` / `backend/app/main.py` — added
+  `PatternMatch`, `PatternsResponse`, `GET /api/patterns?ticker=...&timeframe=...`.
+- `backend/scan_patterns.py` — scans ~14 tickers x 3 timeframes and
+  reports the highest-confidence matches per pattern type, so
+  verification isn't limited to hoping one hand-picked ticker happens to
+  show a given shape right now.
+- `backend/render_pattern_chart.py` — renders a real price chart with
+  swing points marked and a specific detected match's date range shaded,
+  as a PNG, so the match can actually be looked at rather than trusted
+  on the numbers alone (added `matplotlib` as a dev-only dependency in
+  `requirements.txt` for this).
+
+**Bug found and fixed via visual verification.** The double top/bottom
+detector originally checked pairs of swing highs/lows directly against
+each other but never checked what happened *between* them against the
+raw price series. Rendering the first real matches found by
+`scan_patterns.py` and looking at them (AAPL "Double Bottom",
+2025-12-2026-04; AMZN "Double Top", 2025-11-2026-07) showed the bug
+immediately: in both cases, price moved *more* extremely somewhere
+between the two matched points than either matched point itself (AAPL's
+"double bottom" had a rally to a new high between the two troughs that
+made the shape read as three-plus swings, not a clean W; AMZN's "double
+top" had a rally well above both "peaks" in between, meaning the two
+matched points weren't even the most prominent peaks in their own
+range). Fixed by requiring the two matched points to be the genuine
+extrema of the *entire* span between them (checked against `df['high']`/
+`df['low']`, not just the sampled swing points) — added the same
+safeguard to head-and-shoulders/inverse for consistency. Re-scanning
+after the fix dropped double-top matches from 151 to 111 and
+double-bottom from 153 to 92 across the scan universe (confirming real,
+substantial filtering, not a no-op), and the new top matches (GOOGL
+Double Bottom, NVDA Double Top) were re-rendered and now show textbook
+W/M shapes with no competing extremum in between.
+
+**Second issue found and fixed:** `detect_all` on a single ticker/
+timeframe was returning many overlapping double-top/bottom matches for
+the same choppy stretch of price (AAPL 1Y initially returned 10 matches,
+several sharing most of their date range) — each individually satisfied
+the thresholds against some pair of swings, but reporting all of them
+buried the strongest read of a region under near-duplicates. Added
+`_suppress_overlaps`: within each pattern name, keep only the
+highest-confidence match for any overlapping date range. AAPL 1Y now
+returns 5 non-overlapping matches instead of 10.
+
+**Verification performed:**
+- Scanned AAPL, TSLA, NVDA, MSFT, AMZN, GOOGL, META, AMD, NFLX, DIS, BA,
+  PLTR, COIN, SOFI across 1Y/6M/3M timeframes. Got real matches for
+  every pattern type except Symmetrical Triangle (zero occurrences in
+  the current data, not a detector bug — confirmed separately by
+  feeding `detect_triangles` a synthetic converging price series, which
+  it correctly classified as "Symmetrical Triangle").
+- Rendered and visually inspected charts (swing points + shaded match
+  range) for: Double Bottom (AAPL, then GOOGL post-fix), Double Top
+  (AMZN, then NVDA post-fix), Head and Shoulders (META), Inverse Head
+  and Shoulders (AMD), Ascending Triangle (PLTR), Descending Triangle
+  (COIN), Bull Flag (MSFT), Bull Pennant (META), Bear Flag (AMZN) — all
+  post-fix matches show a shape a chartist would actually recognize as
+  the claimed pattern; the MSFT Bull Flag and AMZN Bear Flag in
+  particular are textbook (sharp pole, tight consolidation right after).
+- Golden/death cross wiring re-verified end-to-end through
+  `detect_ma_crossovers` (reuses the Stage-2-verified `ma_crossovers`
+  math, so this only checked that it's correctly surfaced, not the
+  underlying crossover math again).
+- Ran the actual `GET /api/patterns` endpoint end-to-end: 200 with
+  well-formed JSON for a valid ticker, clean 404 for an invalid one.
+
+**Honest limitation to flag for review:** the Inverse Head and Shoulders
+match found on AMD (shoulders ~460/463, head ~424) is mechanically
+correct (head is the genuine extreme of the span, shoulders are within
+tolerance, a real neckline exists) but reads, by eye, more like noisy
+consolidation within a strong uptrend than a textbook inverse H&S — the
+neckline highs on either side of the head are ~550 and ~580, i.e. far
+above the shoulders, which is structurally valid but not visually
+"clean". This reads like the fuzziness the project brief warned about
+rather than a bug to fix: tightening the thresholds further to exclude
+it risks also excluding genuine, tighter H&S patterns elsewhere. Flagged
+here rather than silently tuned away.
+
+**Next step for whoever picks this up:** Move to Stage 4 (frontend chart
+rendering) per the Feedback Loop Protocol above: build the React +
+charting-library frontend against the three existing endpoints
+(`/api/ohlcv`, `/api/indicators`, `/api/patterns`), then confirm
+indicators and pattern flags actually align with the correct dates/
+prices on the rendered chart — the brief specifically calls out off-by-
+one errors here as common, so check bar alignment carefully (the
+backend's `_num_or_none` rounding and ISO-8601 `time` strings should
+make this straightforward, but timezone/date-boundary handling in
+whatever charting library gets used is worth double-checking).
+Remaining stages (frontend, summary generation, end-to-end test) have
+not been started yet.

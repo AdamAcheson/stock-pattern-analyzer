@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.data_fetch import InvalidTickerError, NoDataError, fetch_ohlcv
 from app.indicators import compute_all
+from app.pattern_detection import detect_all
 from app.schemas import (
     BollingerPoint,
     CrossEvent,
@@ -15,6 +16,8 @@ from app.schemas import (
     MACDPoint,
     OHLCVBar,
     OHLCVResponse,
+    PatternMatch,
+    PatternsResponse,
     SRLevel,
 )
 from app.timeframes import TIMEFRAMES
@@ -162,4 +165,44 @@ def get_indicators(
         crossovers=crossovers,
         support=[SRLevel(**lv) for lv in sr["support"]],
         resistance=[SRLevel(**lv) for lv in sr["resistance"]],
+    )
+
+
+@app.get(
+    "/api/patterns",
+    response_model=PatternsResponse,
+    responses={404: {"description": "Invalid ticker or no data"}},
+)
+def get_patterns(
+    ticker: str = Query(..., min_length=1, max_length=10),
+    timeframe: str = Query("1Y"),
+) -> PatternsResponse:
+    if timeframe not in TIMEFRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown timeframe '{timeframe}'. Valid options: {sorted(TIMEFRAMES)}",
+        )
+
+    try:
+        df = fetch_ohlcv(ticker, timeframe)
+    except InvalidTickerError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    matches = detect_all(df)
+
+    return PatternsResponse(
+        ticker=ticker.strip().upper(),
+        timeframe=timeframe,
+        patterns=[
+            PatternMatch(
+                name=m["name"],
+                start=m["start"].isoformat(),
+                end=m["end"].isoformat(),
+                confidence=m["confidence"],
+                detail=m["detail"],
+            )
+            for m in matches
+        ],
     )

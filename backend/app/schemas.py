@@ -47,6 +47,20 @@ class IndicatorsResponse(BaseModel):
     resistance: list[SRLevel]
 
 
+class PatternMatch(BaseModel):
+    name: str
+    start: str
+    end: str
+    confidence: float
+    detail: str
+
+
+class PatternsResponse(BaseModel):
+    ticker: str
+    timeframe: str
+    patterns: list[PatternMatch]
+
+
 class OHLCVBar(BaseModel):
     time: str  # ISO 8601 timestamp
     open: float
