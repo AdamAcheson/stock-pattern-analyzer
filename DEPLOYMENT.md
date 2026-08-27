@@ -57,12 +57,26 @@ configured in `backend/app/main.py`) rather than same-origin requests.
    where you're already logged in.
 3. **Deploy the frontend.** Add New → Project → import the same repo
    again → set **Root Directory** to `frontend` this time → Vercel
-   should auto-detect Vite → deploy.
+   should auto-detect Vite → deploy. If the import wizard's Root
+   Directory picker only shows a `main`-branch file tree and `frontend/`
+   doesn't exist there yet (e.g. it only exists on an unmerged PR
+   branch), just deploy with placeholder settings — it'll fail — then
+   fix Root Directory afterward in Settings → Build and Deployment
+   (a plain text field there, unlike the wizard's folder picker) and
+   redeploy via a Deploy Hook (see below). Also double check the
+   **Framework Preset** on that same settings page: it's set once at
+   import time from whatever was at the repo root then, and changing
+   Root Directory afterward does not always re-trigger auto-detection —
+   confirm it says **Vite**, not still Python/FastAPI, before deploying
+   again.
 4. **Connect them.** In the frontend project's Settings → Environment
    Variables, add `VITE_API_BASE_URL` = `https://<backend-project>.vercel.app`
-   (the URL from step 1, no trailing slash) → redeploy the frontend so
-   the build picks up the new env var (Vite inlines env vars at build
-   time, not runtime).
+   (the URL from step 1, no trailing slash) — **check the Preview
+   environment box, not just Production** (an env var added
+   Production-only is invisible to preview/PR-branch builds, which is
+   what you're testing against before merging) → redeploy the frontend
+   so the build picks up the new env var (Vite inlines env vars at
+   build time, not runtime).
 5. **Smoke-test the real thing:** open the frontend's URL, enter a
    ticker, confirm the chart/patterns/summary all load. Check the
    browser's console for any CORS or network errors — if the backend's
@@ -74,13 +88,26 @@ configured in `backend/app/main.py`) rather than same-origin requests.
 After this one-time setup, every push to the connected branch
 auto-deploys both projects independently — no further manual steps.
 
-## Known risks — both resolved (2026-08-27)
+## Deploying a branch that isn't set as the project's Production Branch
 
-Both were flagged here as reasoned-about-but-unverified while this was
+Both projects currently default to building `main` on every push, but
+this work has been developed on a PR branch that isn't merged yet. If
+you don't see a **Production Branch** setting under a project's
+Settings → Git (it wasn't findable in this account's UI at the time of
+writing), use a **Deploy Hook** instead: Settings → Git → Deploy Hooks
+→ create one with the target branch name → visiting the generated URL
+in a browser triggers a real build of that branch on demand, independent
+of what's set as the production branch. This is how both projects here
+were actually deployed and tested pre-merge.
+
+## Known risks — all resolved (2026-08-27)
+
+These were flagged as reasoned-about-but-unverified while this was
 built, since this environment has no way to deploy to Vercel directly.
-Both are now confirmed fine against a real deploy of the backend project
-(`https://backend-git-claude-stock-analyzer-e98002-adamachesons-projects.vercel.app`,
-the preview URL for this branch):
+All are now confirmed fine against real deploys of both projects
+(backend: `https://backend-git-claude-stock-analyzer-e98002-adamachesons-projects.vercel.app`,
+frontend: `https://stock-pattern-analyzer-git-claude-997324-adamachesons-projects.vercel.app`
+— preview URLs for this branch):
 
 - **`curl_cffi` on Vercel's build image.** `data_fetch.py` depends on
   yfinance's `curl_cffi` backend (see BUILD_SPEC.md Stage 1), which
@@ -91,7 +118,16 @@ the preview URL for this branch):
 - **Function timeout.** Vercel's Hobby-plan serverless functions default
   to a 10-second execution limit. Confirmed working: `/api/ohlcv?ticker=AAPL&timeframe=1M`
   returned a complete 23-bar response (a real yfinance call, not just
-  the no-network `/api/health` check) well within that limit.
+  the no-network `/api/health` check) well within that limit, and the
+  full 1Y-timeframe page load (four concurrent yfinance-backed requests
+  — ohlcv, indicators, patterns, summary) completed successfully too.
+- **End-to-end frontend + backend integration**, the biggest unknown
+  since none of this could be tested without a live deploy: confirmed
+  working. The deployed frontend successfully fetches from the deployed
+  backend across origins (CORS), renders the candlestick chart with all
+  indicator overlays, detected pattern annotations, support/resistance
+  levels, and the plain-English summary panel — all with real computed
+  data for a real ticker (AAPL, 1Y).
 
 Nothing to watch here anymore under normal conditions — if Yahoo
 Finance itself becomes slow at some point in the future, an occasional
