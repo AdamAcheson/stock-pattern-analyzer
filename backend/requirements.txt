@@ -5,7 +5,3 @@ pandas==3.0.5
 numpy==2.4.6
 pydantic==2.13.4
 python-multipart==0.0.20
-
-# Dev-only, used by render_pattern_chart.py to visually verify pattern
-# detection against real charts -- not imported by the app itself.
-matplotlib==3.11.1

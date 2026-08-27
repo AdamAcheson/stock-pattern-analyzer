@@ -1,0 +1,10 @@
+# Extra dependencies for local development/verification only -- not needed
+# to run the app itself, and deliberately excluded from requirements.txt so
+# production deploys (e.g. Vercel's Python serverless functions) don't pull
+# in a large package they never import.
+#
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+
+# Used by render_pattern_chart.py to render detected patterns on real
+# charts for visual verification (see BUILD_SPEC.md Stage 3).
+matplotlib==3.11.1

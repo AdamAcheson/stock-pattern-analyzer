@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -28,9 +29,19 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Stock Pattern & Technical Analysis API")
 
+# The frontend is deployed as a separate Vercel project (see
+# backend/vercel.json and DEPLOYMENT.md), so this API has to allow
+# cross-origin requests explicitly rather than relying on same-origin.
+# allow_origin_regex covers both the production domain and every
+# preview-deployment URL Vercel generates per-branch/per-PR (they're all
+# random subdomains of vercel.app); FRONTEND_ORIGIN is an escape hatch
+# for a custom domain, which wouldn't match that pattern.
+_extra_origins = [o for o in [os.environ.get("FRONTEND_ORIGIN")] if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", *_extra_origins],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_methods=["GET"],
     allow_headers=["*"],
 )
