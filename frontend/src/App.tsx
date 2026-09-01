@@ -115,6 +115,10 @@ function App() {
         <>
           <section className="indicator-summary">
             <SummaryStat label="Last Close" value={data.ohlcv.bars.at(-1)?.close.toFixed(2)} />
+            <SummaryStat label="Day High" value={data.indicators.price_range.day_high?.toFixed(2)} />
+            <SummaryStat label="Day Low" value={data.indicators.price_range.day_low?.toFixed(2)} />
+            <SummaryStat label="52W High" value={data.indicators.price_range.year_high?.toFixed(2)} />
+            <SummaryStat label="52W Low" value={data.indicators.price_range.year_low?.toFixed(2)} />
             <SummaryStat label="SMA 20" value={lastValue(data.indicators.sma_20)?.toFixed(2)} />
             <SummaryStat label="SMA 50" value={lastValue(data.indicators.sma_50)?.toFixed(2)} />
             <SummaryStat label="SMA 200" value={lastValue(data.indicators.sma_200)?.toFixed(2)} />

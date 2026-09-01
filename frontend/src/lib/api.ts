@@ -51,6 +51,13 @@ export interface SRLevel {
   touches: number;
 }
 
+export interface PriceRange {
+  day_high: number | null;
+  day_low: number | null;
+  year_high: number | null;
+  year_low: number | null;
+}
+
 export interface IndicatorsResponse {
   ticker: string;
   timeframe: string;
@@ -66,6 +73,7 @@ export interface IndicatorsResponse {
   crossovers: CrossEvent[];
   support: SRLevel[];
   resistance: SRLevel[];
+  price_range: PriceRange;
 }
 
 export interface PatternMatch {
