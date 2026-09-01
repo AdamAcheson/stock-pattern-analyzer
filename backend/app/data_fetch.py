@@ -12,12 +12,27 @@ import logging
 
 import pandas as pd
 import yfinance as yf
+from curl_cffi import requests as curl_requests
 
 from app.timeframes import TIMEFRAMES
 
 logger = logging.getLogger(__name__)
 
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
+
+# yfinance defaults to curl_cffi's Chrome TLS impersonation, which this
+# deployment's egress proxy resets mid-handshake (the proxy's TLS
+# re-termination doesn't tolerate Chrome's fingerprint/ALPN here, though
+# Safari's and Edge's pass through fine). Yahoo also outright blocks
+# requests that carry no browser TLS fingerprint at all (plain curl_cffi
+# with no `impersonate` gets a permanent 429). Impersonating Safari is the
+# one combination that clears both constraints, so every yfinance session
+# is built with it explicitly instead of relying on yfinance's default.
+_YF_SESSION = curl_requests.Session(impersonate="safari")
+
+
+def _new_yf_ticker(ticker: str) -> yf.Ticker:
+    return yf.Ticker(ticker, session=_YF_SESSION)
 
 
 class InvalidTickerError(Exception):
@@ -46,7 +61,7 @@ def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
             f"Unknown timeframe '{timeframe}'. Valid options: {sorted(TIMEFRAMES)}"
         )
 
-    t = yf.Ticker(ticker)
+    t = _new_yf_ticker(ticker)
 
     # yfinance doesn't raise on an unknown ticker for history(); it just
     # returns an empty frame. We distinguish "unknown ticker" from
