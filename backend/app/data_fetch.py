@@ -9,6 +9,8 @@ touching indicator or pattern-detection code.
 from __future__ import annotations
 
 import logging
+import math
+from typing import NamedTuple
 
 import pandas as pd
 import yfinance as yf
@@ -89,6 +91,48 @@ def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
         )
 
     return df
+
+
+class PriceRange(NamedTuple):
+    day_high: float | None
+    day_low: float | None
+    year_high: float | None
+    year_low: float | None
+
+
+def _clean_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(value) else value
+
+
+def fetch_price_range(ticker: str) -> PriceRange:
+    """Fetch today's high/low and the trailing-52-week high/low for a ticker.
+
+    Uses yfinance's `fast_info`, which Yahoo computes server-side from its
+    own full price history rather than whatever window the selected chart
+    timeframe happens to cover -- so these values stay correct even when
+    someone is viewing a 1D or 1M chart. Returns None for any field Yahoo
+    doesn't have data for (e.g. year_high/year_low for a ticker that IPO'd
+    less than a year ago) rather than raising.
+    """
+    ticker = ticker.strip().upper()
+    t = _new_yf_ticker(ticker)
+    try:
+        fast_info = t.fast_info
+        return PriceRange(
+            day_high=_clean_float(fast_info.get("dayHigh")),
+            day_low=_clean_float(fast_info.get("dayLow")),
+            year_high=_clean_float(fast_info.get("yearHigh")),
+            year_low=_clean_float(fast_info.get("yearLow")),
+        )
+    except Exception as exc:
+        logger.warning("fast_info lookup failed for %s: %s", ticker, exc)
+        return PriceRange(day_high=None, day_low=None, year_high=None, year_low=None)
 
 
 def _ticker_exists(t: yf.Ticker) -> bool:

@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.data_fetch import InvalidTickerError, NoDataError, fetch_ohlcv
+from app.data_fetch import InvalidTickerError, NoDataError, fetch_ohlcv, fetch_price_range
 from app.indicators import compute_all
 from app.pattern_detection import detect_all
 from app.schemas import (
@@ -19,6 +19,7 @@ from app.schemas import (
     OHLCVResponse,
     PatternMatch,
     PatternsResponse,
+    PriceRange,
     SRLevel,
     SummaryResponse,
 )
@@ -162,6 +163,7 @@ def get_indicators(
     crossovers.sort(key=lambda c: c.time)
 
     sr = ind["support_resistance"]
+    price_range = fetch_price_range(ticker)
 
     return IndicatorsResponse(
         ticker=ticker.strip().upper(),
@@ -178,6 +180,7 @@ def get_indicators(
         crossovers=crossovers,
         support=[SRLevel(**lv) for lv in sr["support"]],
         resistance=[SRLevel(**lv) for lv in sr["resistance"]],
+        price_range=PriceRange(**price_range._asdict()),
     )
 
 

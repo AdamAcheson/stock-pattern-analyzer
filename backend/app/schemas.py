@@ -30,6 +30,13 @@ class SRLevel(BaseModel):
     touches: int
 
 
+class PriceRange(BaseModel):
+    day_high: float | None
+    day_low: float | None
+    year_high: float | None
+    year_low: float | None
+
+
 class IndicatorsResponse(BaseModel):
     ticker: str
     timeframe: str
@@ -45,6 +52,7 @@ class IndicatorsResponse(BaseModel):
     crossovers: list[CrossEvent]
     support: list[SRLevel]
     resistance: list[SRLevel]
+    price_range: PriceRange
 
 
 class PatternMatch(BaseModel):
