@@ -215,12 +215,27 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
         color: bar.close >= bar.open ? 'rgba(22,163,74,0.5)' : 'rgba(220,38,38,0.5)',
       })),
     );
+    // VWMA (~tens/hundreds of dollars) must not share volumeSeries' price
+    // scale (0 to tens of millions of shares) -- without its own scale
+    // here it renders as a flat line pinned to the bottom of the pane,
+    // indistinguishable from zero. `priceScaleId` gives it an independent,
+    // auto-ranged scale overlaid on the same pane; hidden (`visible:
+    // false`) since this pane already shows a volume axis and a second
+    // visible axis here would fight it for space.
     const vwmaSeries = chart.addSeries(
       LineSeries,
-      { color: OVERLAY_COLORS.vwma20, lineWidth: 1, title: '', priceLineVisible: false, lastValueVisible: false },
+      {
+        color: OVERLAY_COLORS.vwma20,
+        lineWidth: 1,
+        title: '',
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceScaleId: 'vwma',
+      },
       1,
     );
     vwmaSeries.setData(toLinePoints(indicators.vwma_20));
+    chart.priceScale('vwma', 1).applyOptions({ visible: false });
 
     // ---- Pane 2: RSI ----
     // Only 2 reference lines share this pane's own price scale (no other
