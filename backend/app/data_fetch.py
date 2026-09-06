@@ -45,23 +45,23 @@ class NoDataError(Exception):
     """Raised when a ticker is valid but no data exists for the requested timeframe."""
 
 
-def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
-    """Fetch and normalize OHLCV data for a ticker over a given timeframe.
+def fetch_history(ticker: str, period: str, interval: str, context: str) -> pd.DataFrame:
+    """Core fetch/validate/normalize, parameterized directly by yfinance
+    period/interval rather than one of the app's selectable chart
+    timeframes. Shared by `fetch_ohlcv` (which resolves a UI timeframe to
+    a period/interval pair first) and the multi-timeframe trend overview,
+    which needs period/interval combinations -- e.g. years of weekly or
+    monthly bars -- that don't correspond to any entry in TIMEFRAMES.
+    `context` is used only for error messages (e.g. "timeframe '1Y'").
 
     Returns a DataFrame indexed by UTC-naive timestamp (ascending), with
     columns: open, high, low, close, volume. Raises InvalidTickerError if
     the ticker doesn't exist, or NoDataError if it exists but has no bars
-    for the requested timeframe.
+    for the requested period/interval.
     """
     ticker = ticker.strip().upper()
     if not ticker:
         raise InvalidTickerError("Ticker symbol is empty")
-
-    spec = TIMEFRAMES.get(timeframe)
-    if spec is None:
-        raise ValueError(
-            f"Unknown timeframe '{timeframe}'. Valid options: {sorted(TIMEFRAMES)}"
-        )
 
     t = _new_yf_ticker(ticker)
 
@@ -70,7 +70,7 @@ def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
     # "known ticker, no bars in this window" by checking `info`/`fast_info`
     # is unable to resolve anything meaningful either.
     try:
-        raw = t.history(period=spec.period, interval=spec.interval, auto_adjust=True)
+        raw = t.history(period=period, interval=interval, auto_adjust=True)
     except Exception as exc:  # yfinance raises assorted exceptions on network/parse errors
         logger.warning("yfinance history() raised for %s: %s", ticker, exc)
         raise NoDataError(f"Could not fetch data for '{ticker}': {exc}") from exc
@@ -79,18 +79,25 @@ def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
         # Disambiguate: does the ticker exist at all?
         if not _ticker_exists(t):
             raise InvalidTickerError(f"'{ticker}' is not a recognized ticker symbol")
-        raise NoDataError(
-            f"'{ticker}' is a valid ticker but has no data for timeframe '{timeframe}'"
-        )
+        raise NoDataError(f"'{ticker}' is a valid ticker but has no data for {context}")
 
     df = _normalize(raw)
 
     if df.empty:
-        raise NoDataError(
-            f"'{ticker}' returned only invalid/incomplete bars for timeframe '{timeframe}'"
-        )
+        raise NoDataError(f"'{ticker}' returned only invalid/incomplete bars for {context}")
 
     return df
+
+
+def fetch_ohlcv(ticker: str, timeframe: str) -> pd.DataFrame:
+    """Fetch and normalize OHLCV data for a ticker over one of the app's
+    selectable chart timeframes (see app.timeframes.TIMEFRAMES)."""
+    spec = TIMEFRAMES.get(timeframe)
+    if spec is None:
+        raise ValueError(
+            f"Unknown timeframe '{timeframe}'. Valid options: {sorted(TIMEFRAMES)}"
+        )
+    return fetch_history(ticker, spec.period, spec.interval, context=f"timeframe '{timeframe}'")
 
 
 class PriceRange(NamedTuple):

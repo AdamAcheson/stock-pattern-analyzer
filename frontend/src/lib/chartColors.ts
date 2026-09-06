@@ -7,11 +7,13 @@
 export const OVERLAY_COLORS = {
   sma20: '#2563eb',
   sma50: '#7c3aed',
+  sma100: '#059669',
   sma200: '#ea580c',
   ema12: '#0891b2',
   ema26: '#be185d',
   bollinger: '#94a3b8',
   vwma20: '#f59e0b',
+  fibonacci: '#a855f7',
   rsi14: '#7c3aed',
   macd: '#2563eb',
   signal: '#ea580c',
@@ -20,9 +22,11 @@ export const OVERLAY_COLORS = {
 export const OVERLAY_LEGEND: { label: string; color: string }[] = [
   { label: 'SMA 20', color: OVERLAY_COLORS.sma20 },
   { label: 'SMA 50', color: OVERLAY_COLORS.sma50 },
+  { label: 'SMA 100', color: OVERLAY_COLORS.sma100 },
   { label: 'SMA 200', color: OVERLAY_COLORS.sma200 },
   { label: 'EMA 12', color: OVERLAY_COLORS.ema12 },
   { label: 'EMA 26', color: OVERLAY_COLORS.ema26 },
   { label: 'Bollinger Bands', color: OVERLAY_COLORS.bollinger },
   { label: 'VWMA 20 (volume pane)', color: OVERLAY_COLORS.vwma20 },
+  { label: 'Fibonacci Levels', color: OVERLAY_COLORS.fibonacci },
 ];

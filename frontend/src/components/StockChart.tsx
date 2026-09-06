@@ -113,6 +113,7 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
     const overlaySpecs: { data: IndicatorsResponse['sma_20']; color: string; lineWidth: 1 | 2 }[] = [
       { data: indicators.sma_20, color: OVERLAY_COLORS.sma20, lineWidth: 1 },
       { data: indicators.sma_50, color: OVERLAY_COLORS.sma50, lineWidth: 1 },
+      { data: indicators.sma_100, color: OVERLAY_COLORS.sma100, lineWidth: 1 },
       { data: indicators.sma_200, color: OVERLAY_COLORS.sma200, lineWidth: 2 },
       { data: indicators.ema_12, color: OVERLAY_COLORS.ema12, lineWidth: 1 },
       { data: indicators.ema_26, color: OVERLAY_COLORS.ema26, lineWidth: 1 },
@@ -166,6 +167,19 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
         color: '#dc2626',
         lineWidth: 1,
         lineStyle: 3,
+        axisLabelVisible: false,
+      });
+    }
+
+    // Fibonacci retracement levels, same no-axis-label treatment as
+    // support/resistance -- exact prices are listed in the Fibonacci
+    // report-card section instead.
+    for (const level of indicators.fibonacci.levels) {
+      candleSeries.createPriceLine({
+        price: level.price,
+        color: OVERLAY_COLORS.fibonacci,
+        lineWidth: 1,
+        lineStyle: 2, // dashed
         axisLabelVisible: false,
       });
     }

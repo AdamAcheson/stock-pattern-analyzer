@@ -58,11 +58,37 @@ export interface PriceRange {
   year_low: number | null;
 }
 
+export interface FibonacciLevel {
+  ratio: number;
+  price: number;
+}
+
+export interface FibonacciRetracement {
+  swing_high: number;
+  swing_high_time: string;
+  swing_low: number;
+  swing_low_time: string;
+  direction: string;
+  levels: FibonacciLevel[];
+}
+
+export interface VolumeTrend {
+  available: boolean;
+  recent_avg_volume: number | null;
+  baseline_avg_volume: number | null;
+  change_pct: number | null;
+  up_day_avg_volume: number | null;
+  down_day_avg_volume: number | null;
+  pressure_ratio: number | null;
+  dominant_side: string | null;
+}
+
 export interface IndicatorsResponse {
   ticker: string;
   timeframe: string;
   sma_20: IndicatorPoint[];
   sma_50: IndicatorPoint[];
+  sma_100: IndicatorPoint[];
   sma_200: IndicatorPoint[];
   ema_12: IndicatorPoint[];
   ema_26: IndicatorPoint[];
@@ -74,6 +100,24 @@ export interface IndicatorsResponse {
   support: SRLevel[];
   resistance: SRLevel[];
   price_range: PriceRange;
+  fibonacci: FibonacciRetracement;
+  volume_trend: VolumeTrend;
+}
+
+export interface TimeframeTrend {
+  label: string;
+  trend: string;
+  close: number | null;
+  short_ma: number | null;
+  short_window: number;
+  long_ma: number | null;
+  long_window: number;
+  error: string | null;
+}
+
+export interface TrendOverviewResponse {
+  ticker: string;
+  timeframes: TimeframeTrend[];
 }
 
 export interface PatternMatch {
@@ -99,8 +143,11 @@ export interface SummaryResponse {
   timeframe: string;
   headline: string;
   trend: string;
+  moving_averages: string;
   momentum: string;
   volatility: string;
+  volume: string;
+  fibonacci: string;
   patterns: string;
   synthesis: string;
   disclaimer: string;
@@ -138,4 +185,8 @@ export function fetchPatterns(ticker: string, timeframe: Timeframe): Promise<Pat
 
 export function fetchSummary(ticker: string, timeframe: Timeframe): Promise<SummaryResponse> {
   return getJson(`/api/summary?ticker=${encodeURIComponent(ticker)}&timeframe=${timeframe}`);
+}
+
+export function fetchTrendOverview(ticker: string): Promise<TrendOverviewResponse> {
+  return getJson(`/api/trend-overview?ticker=${encodeURIComponent(ticker)}`);
 }

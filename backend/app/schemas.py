@@ -37,11 +37,37 @@ class PriceRange(BaseModel):
     year_low: float | None
 
 
+class FibonacciLevel(BaseModel):
+    ratio: float
+    price: float
+
+
+class FibonacciRetracement(BaseModel):
+    swing_high: float
+    swing_high_time: str
+    swing_low: float
+    swing_low_time: str
+    direction: str
+    levels: list[FibonacciLevel]
+
+
+class VolumeTrend(BaseModel):
+    available: bool
+    recent_avg_volume: float | None = None
+    baseline_avg_volume: float | None = None
+    change_pct: float | None = None
+    up_day_avg_volume: float | None = None
+    down_day_avg_volume: float | None = None
+    pressure_ratio: float | None = None
+    dominant_side: str | None = None
+
+
 class IndicatorsResponse(BaseModel):
     ticker: str
     timeframe: str
     sma_20: list[IndicatorPoint]
     sma_50: list[IndicatorPoint]
+    sma_100: list[IndicatorPoint]
     sma_200: list[IndicatorPoint]
     ema_12: list[IndicatorPoint]
     ema_26: list[IndicatorPoint]
@@ -53,6 +79,24 @@ class IndicatorsResponse(BaseModel):
     support: list[SRLevel]
     resistance: list[SRLevel]
     price_range: PriceRange
+    fibonacci: FibonacciRetracement
+    volume_trend: VolumeTrend
+
+
+class TimeframeTrend(BaseModel):
+    label: str  # "Daily" | "Weekly" | "Monthly"
+    trend: str
+    close: float | None
+    short_ma: float | None
+    short_window: int
+    long_ma: float | None
+    long_window: int
+    error: str | None = None
+
+
+class TrendOverviewResponse(BaseModel):
+    ticker: str
+    timeframes: list[TimeframeTrend]
 
 
 class PatternMatch(BaseModel):
@@ -78,8 +122,11 @@ class SummaryResponse(BaseModel):
     timeframe: str
     headline: str
     trend: str
+    moving_averages: str
     momentum: str
     volatility: str
+    volume: str
+    fibonacci: str
     patterns: str
     synthesis: str
     disclaimer: str
