@@ -187,12 +187,116 @@ def support_resistance_levels(
     }
 
 
+def fibonacci_retracement(df: pd.DataFrame, lookback: int | None = None) -> dict:
+    """Fibonacci retracement levels between the highest high and lowest
+    low over the given window (the whole DataFrame, or just the trailing
+    `lookback` bars if given).
+
+    ASSUMPTION: uses the window's highest high / lowest low as "the"
+    swing rather than trying to algorithmically pick a single "most
+    significant" swing-point pair -- this matches how every real charting
+    platform's fib tool actually works (you drag it between any two
+    points yourself), so it's the standard, not a simplification of one.
+    Direction is inferred from which extreme came later in time: if the
+    low predates the high, price is being read as retracing down from a
+    rally (levels are potential support on a pullback); if the high
+    predates the low, price is retracing up from a decline (levels are
+    potential resistance on a bounce). These are read as descriptive
+    "zones technical analysts watch", not predictions that price will
+    reach or reverse at any of them. 50% is included alongside the true
+    Fibonacci ratios (23.6%, 38.2%, 61.8%, 78.6%) because it's standard
+    practice on virtually every charting platform despite not being a
+    Fibonacci number itself.
+    """
+    window = df if lookback is None else df.iloc[-lookback:]
+    high_idx = window["high"].idxmax()
+    low_idx = window["low"].idxmin()
+    high_price = float(window.loc[high_idx, "high"])
+    low_price = float(window.loc[low_idx, "low"])
+    span = high_price - low_price
+    uptrend = low_idx < high_idx
+
+    ratios = [0.236, 0.382, 0.5, 0.618, 0.786]
+    if uptrend:
+        levels = [{"ratio": r, "price": round(high_price - span * r, 4)} for r in ratios]
+    else:
+        levels = [{"ratio": r, "price": round(low_price + span * r, 4)} for r in ratios]
+
+    return {
+        "swing_high": high_price,
+        "swing_high_time": high_idx,
+        "swing_low": low_price,
+        "swing_low_time": low_idx,
+        "direction": "pullback zones within an uptrend" if uptrend else "bounce zones within a decline",
+        "levels": levels,
+    }
+
+
+def volume_trend(df: pd.DataFrame, recent_window: int = 10, baseline_window: int = 50) -> dict:
+    """Compares recent volume to its own longer-run baseline, and volume
+    on up days vs down days, as a plain-English read of buying vs selling
+    pressure.
+
+    ASSUMPTIONS: "recent" = trailing `recent_window` bars (default 10);
+    "baseline" = trailing `baseline_window` bars (default 50), which
+    *includes* the recent window rather than a disjoint prior period --
+    this deliberately answers "is volume elevated right now relative to
+    the last couple months" rather than comparing two separate eras.
+    Buy/sell pressure is a simple average-volume-on-up-days vs
+    average-volume-on-down-days ratio over the baseline window: a
+    heuristic proxy for accumulation/distribution, not a true
+    volume-weighted calculation like OBV. A ratio within +/-15% of 1.0 is
+    read as "balanced" rather than forcing every reading into a side.
+    """
+    n = len(df)
+    if n == 0:
+        return {"available": False}
+
+    baseline_start = max(0, n - baseline_window)
+    baseline_vol = df["volume"].iloc[baseline_start:]
+    recent_vol = df["volume"].iloc[max(0, n - recent_window):]
+    if baseline_vol.empty or recent_vol.empty:
+        return {"available": False}
+
+    baseline_avg = float(baseline_vol.mean())
+    recent_avg = float(recent_vol.mean())
+    change_pct = ((recent_avg / baseline_avg) - 1) * 100 if baseline_avg > 0 else None
+
+    changes = df["close"].diff().iloc[baseline_start:]
+    vols_in_window = df["volume"].iloc[baseline_start:]
+    up_day_vol = vols_in_window[changes > 0]
+    down_day_vol = vols_in_window[changes < 0]
+    up_avg = float(up_day_vol.mean()) if not up_day_vol.empty else None
+    down_avg = float(down_day_vol.mean()) if not down_day_vol.empty else None
+
+    pressure_ratio = None
+    dominant_side = "balanced"
+    if up_avg is not None and down_avg is not None and down_avg > 0:
+        pressure_ratio = up_avg / down_avg
+        if pressure_ratio >= 1.15:
+            dominant_side = "buyers"
+        elif pressure_ratio <= 0.87:
+            dominant_side = "sellers"
+
+    return {
+        "available": True,
+        "recent_avg_volume": recent_avg,
+        "baseline_avg_volume": baseline_avg,
+        "change_pct": change_pct,
+        "up_day_avg_volume": up_avg,
+        "down_day_avg_volume": down_avg,
+        "pressure_ratio": pressure_ratio,
+        "dominant_side": dominant_side,
+    }
+
+
 def compute_all(df: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
     """Compute the full indicator bundle used by the API layer."""
     close = df["close"]
     return {
         "sma_20": sma(close, 20),
         "sma_50": sma(close, 50),
+        "sma_100": sma(close, 100),
         "sma_200": sma(close, 200),
         "ema_12": ema(close, 12),
         "ema_26": ema(close, 26),
@@ -202,4 +306,6 @@ def compute_all(df: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
         "bollinger": bollinger_bands(close),
         "ma_crossovers": ma_crossovers(df),
         "support_resistance": support_resistance_levels(df),
+        "fibonacci": fibonacci_retracement(df),
+        "volume_trend": volume_trend(df),
     }

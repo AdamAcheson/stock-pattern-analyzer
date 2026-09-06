@@ -306,3 +306,56 @@
   color: #6b7280;
   font-style: italic;
 }
+
+.trend-overview {
+  margin-bottom: 1.1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.trend-overview h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin: 0 0 0.5rem;
+}
+
+.trend-overview-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.trend-overview-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.trend-overview-label {
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.trend-overview-value {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.trend-overview-value.trend-up {
+  color: #16a34a;
+}
+
+.trend-overview-value.trend-down {
+  color: #dc2626;
+}
+
+.trend-overview-value.trend-mixed {
+  color: #6b7280;
+}
+
+.trend-overview-detail {
+  font-size: 0.7rem;
+  color: #9ca3af;
+}

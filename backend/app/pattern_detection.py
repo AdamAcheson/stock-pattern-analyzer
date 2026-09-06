@@ -632,6 +632,111 @@ def detect_flags_pennants(
     return matches
 
 
+def detect_cup_and_handle(
+    df: pd.DataFrame,
+    window: int = 5,
+    rim_tolerance_pct: float = 0.05,
+    min_cup_depth_pct: float = 0.10,
+    max_cup_depth_pct: float = 0.50,
+    min_cup_bars: int = 20,
+    max_handle_bars: int = 20,
+    max_handle_depth_pct: float = 0.20,
+) -> list[dict]:
+    """Cup and handle: price falls from a swing high (left rim) to a
+    swing low (the cup bottom), recovers to a swing high near the left
+    rim's price (right rim -- the "U" shape), then pulls back shallowly
+    for a short "handle" before a breakout above the rim.
+
+    ASSUMPTIONS: this is one of the fuzziest classical patterns to define
+    algorithmically -- real chartists judge how "rounded" the cup looks
+    visually, which this doesn't attempt to measure directly.
+    - Left/right rim = swing highs within `rim_tolerance_pct` (default
+      5%, looser than double-top's 3% since the cup's recovery doesn't
+      need to retest as precisely) of each other, separated by at least
+      `min_cup_bars` (default 20) bars, with a swing low (the cup bottom)
+      between them that isn't right at either edge (at least a quarter of
+      `min_cup_bars` in from both sides, so the shape has a genuine base
+      rather than a sharp V pinned to one rim).
+    - Cup depth (rim average to bottom) must fall between
+      `min_cup_depth_pct` and `max_cup_depth_pct` (10%-50%) -- shallower
+      isn't really a cup, deeper starts to look like a different (likely
+      bearish) structure entirely.
+    - The handle is the price action in the `max_handle_bars` (default
+      20) bars after the right rim: it must stay within
+      `max_handle_depth_pct` (default 20%) of the rim without falling
+      back to or past the cup bottom -- a pullback that deep isn't a
+      "handle", it's the cup failing.
+    - Confirmation is a close above the higher of the two rims, scanned
+      for after the handle window closes, consistent with every other
+      detector here treating "confirmed" as a close beyond the pattern's
+      defining level.
+
+    Directional bias is always Bullish -- unlike triangles or flags, this
+    pattern doesn't have a bearish mirror image in standard usage.
+    """
+    points = get_swing_points(df, window=window)
+    highs = [p for p in points if p["type"] == "high"]
+    lows = [p for p in points if p["type"] == "low"]
+    matches = []
+
+    for i, left in enumerate(highs):
+        for right in highs[i + 1 :]:
+            if right["pos"] - left["pos"] < min_cup_bars:
+                continue
+            rim_avg = (left["price"] + right["price"]) / 2
+            rim_diff_pct = abs(left["price"] - right["price"]) / rim_avg
+            if rim_diff_pct > rim_tolerance_pct:
+                continue
+
+            between_lows = [l for l in lows if left["pos"] < l["pos"] < right["pos"]]
+            if not between_lows:
+                continue
+            bottom = min(between_lows, key=lambda l: l["price"])
+            edge_margin = max(1, min_cup_bars // 4)
+            if bottom["pos"] - left["pos"] < edge_margin or right["pos"] - bottom["pos"] < edge_margin:
+                continue  # bottom sits right at one rim -- a V, not a rounded cup
+            depth_pct = (rim_avg - bottom["price"]) / rim_avg
+            if not (min_cup_depth_pct <= depth_pct <= max_cup_depth_pct):
+                continue
+
+            handle_end_pos = min(right["pos"] + max_handle_bars, len(df) - 1)
+            handle_low = float(df["low"].iloc[right["pos"] : handle_end_pos + 1].min())
+            if handle_low <= bottom["price"]:
+                continue  # pullback erased the whole cup -- not a handle
+            rim_level = max(left["price"], right["price"])
+            handle_depth_pct = (rim_level - handle_low) / rim_level
+            if handle_depth_pct > max_handle_depth_pct:
+                continue
+
+            confidence = _confidence(
+                rim_diff_pct / rim_tolerance_pct,
+                handle_depth_pct / max_handle_depth_pct,
+            )
+            breakout_pos = _find_breakout(df, handle_end_pos + 1, lambda p: rim_level, "above")
+            volume_note, vol_adjust = _volume_note(df, left["pos"], handle_end_pos, breakout_pos)
+            matches.append(
+                {
+                    "name": "Cup and Handle",
+                    "start": left["time"],
+                    "end": df.index[handle_end_pos],
+                    "confidence": _clamp_confidence(confidence + vol_adjust),
+                    "detail": (
+                        f"Rims {left['price']:.2f} ({left['time'].date()}) / "
+                        f"{right['price']:.2f} ({right['time'].date()}), cup bottom "
+                        f"{bottom['price']:.2f} ({depth_pct:.1%} deep), handle pulled back "
+                        f"{handle_depth_pct:.1%} from the rim"
+                    ),
+                    "directional_bias": "Bullish",
+                    "status": "Confirmed" if breakout_pos is not None else "Forming",
+                    "confirmation_date": df.index[breakout_pos] if breakout_pos is not None else None,
+                    "volume_note": volume_note,
+                }
+            )
+            break  # nearest qualifying right rim only, like double-top/bottom
+
+    return matches
+
+
 def detect_ma_crossovers(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> list[dict]:
     """Wraps the golden/death cross detection already computed in
     app.indicators.ma_crossovers (Stage 2) into the same pattern-match
@@ -709,6 +814,7 @@ def detect_all(df: pd.DataFrame, window: int = 5) -> list[dict]:
     matches = [
         *detect_double_top_bottom(df, window=window),
         *detect_head_and_shoulders(df, window=window),
+        *detect_cup_and_handle(df, window=window),
         *detect_triangles(df, window=window),
         *detect_flags_pennants(df),
         *detect_ma_crossovers(df),

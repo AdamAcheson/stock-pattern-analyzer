@@ -8,10 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.data_fetch import InvalidTickerError, NoDataError, fetch_ohlcv, fetch_price_range
 from app.indicators import compute_all
+from app.multi_timeframe import fetch_multi_timeframe_trend
 from app.pattern_detection import detect_all
 from app.schemas import (
     BollingerPoint,
     CrossEvent,
+    FibonacciLevel,
+    FibonacciRetracement,
     IndicatorPoint,
     IndicatorsResponse,
     MACDPoint,
@@ -22,6 +25,9 @@ from app.schemas import (
     PriceRange,
     SRLevel,
     SummaryResponse,
+    TimeframeTrend,
+    TrendOverviewResponse,
+    VolumeTrend,
 )
 from app.summary import generate_summary
 from app.timeframes import TIMEFRAMES
@@ -164,12 +170,14 @@ def get_indicators(
 
     sr = ind["support_resistance"]
     price_range = fetch_price_range(ticker)
+    fib = ind["fibonacci"]
 
     return IndicatorsResponse(
         ticker=ticker.strip().upper(),
         timeframe=timeframe,
         sma_20=_series_to_points(ind["sma_20"]),
         sma_50=_series_to_points(ind["sma_50"]),
+        sma_100=_series_to_points(ind["sma_100"]),
         sma_200=_series_to_points(ind["sma_200"]),
         ema_12=_series_to_points(ind["ema_12"]),
         ema_26=_series_to_points(ind["ema_26"]),
@@ -181,6 +189,15 @@ def get_indicators(
         support=[SRLevel(**lv) for lv in sr["support"]],
         resistance=[SRLevel(**lv) for lv in sr["resistance"]],
         price_range=PriceRange(**price_range._asdict()),
+        fibonacci=FibonacciRetracement(
+            swing_high=fib["swing_high"],
+            swing_high_time=fib["swing_high_time"].isoformat(),
+            swing_low=fib["swing_low"],
+            swing_low_time=fib["swing_low_time"].isoformat(),
+            direction=fib["direction"],
+            levels=[FibonacciLevel(**lv) for lv in fib["levels"]],
+        ),
+        volume_trend=VolumeTrend(**ind["volume_trend"]),
     )
 
 
@@ -260,4 +277,29 @@ def get_summary(
         ticker=ticker_upper,
         timeframe=timeframe,
         **summary,
+    )
+
+
+@app.get(
+    "/api/trend-overview",
+    response_model=TrendOverviewResponse,
+    responses={404: {"description": "Invalid ticker"}},
+)
+def get_trend_overview(ticker: str = Query(..., min_length=1, max_length=10)) -> TrendOverviewResponse:
+    """Daily/weekly/monthly trend read, independent of the chart
+    timeframe currently selected in the UI (see app.multi_timeframe)."""
+    try:
+        # Validate the ticker itself against a cheap, well-understood
+        # fetch before doing three more (slower) period/interval fetches
+        # for the actual trend reads.
+        fetch_ohlcv(ticker, "1M")
+    except InvalidTickerError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    timeframes = fetch_multi_timeframe_trend(ticker)
+    return TrendOverviewResponse(
+        ticker=ticker.strip().upper(),
+        timeframes=[TimeframeTrend(**tf) for tf in timeframes],
     )

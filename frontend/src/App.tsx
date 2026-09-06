@@ -4,6 +4,7 @@ import {
   fetchIndicators,
   fetchPatterns,
   fetchSummary,
+  fetchTrendOverview,
   TIMEFRAMES,
   ApiError,
   type Timeframe,
@@ -11,6 +12,7 @@ import {
   type IndicatorsResponse,
   type PatternsResponse,
   type SummaryResponse,
+  type TrendOverviewResponse,
 } from './lib/api';
 import StockChart from './components/StockChart';
 import PatternList from './components/PatternList';
@@ -24,6 +26,7 @@ interface LoadedData {
   indicators: IndicatorsResponse;
   patterns: PatternsResponse;
   summary: SummaryResponse;
+  trendOverview: TrendOverviewResponse;
 }
 
 function lastValue(points: { value: number | null }[]): number | null {
@@ -51,10 +54,11 @@ function App() {
       fetchIndicators(ticker, timeframe),
       fetchPatterns(ticker, timeframe),
       fetchSummary(ticker, timeframe),
+      fetchTrendOverview(ticker),
     ])
-      .then(([ohlcv, indicators, patterns, summary]) => {
+      .then(([ohlcv, indicators, patterns, summary, trendOverview]) => {
         if (cancelled) return;
-        setData({ ohlcv, indicators, patterns, summary });
+        setData({ ohlcv, indicators, patterns, summary, trendOverview });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -121,6 +125,7 @@ function App() {
             <SummaryStat label="52W Low" value={data.indicators.price_range.year_low?.toFixed(2)} />
             <SummaryStat label="SMA 20" value={lastValue(data.indicators.sma_20)?.toFixed(2)} />
             <SummaryStat label="SMA 50" value={lastValue(data.indicators.sma_50)?.toFixed(2)} />
+            <SummaryStat label="SMA 100" value={lastValue(data.indicators.sma_100)?.toFixed(2)} />
             <SummaryStat label="SMA 200" value={lastValue(data.indicators.sma_200)?.toFixed(2)} />
             <SummaryStat label="RSI 14" value={lastValue(data.indicators.rsi_14)?.toFixed(1)} />
           </section>
@@ -145,7 +150,7 @@ function App() {
           </section>
 
           <section className="summary-section-wrapper">
-            <SummaryPanel summary={data.summary} />
+            <SummaryPanel summary={data.summary} trendOverview={data.trendOverview} />
           </section>
         </>
       )}

@@ -136,6 +136,95 @@ def _describe_momentum(ind: dict) -> tuple[str, str]:
     return " ".join(parts), signal
 
 
+def _describe_moving_averages(df: pd.DataFrame, ind: dict, patterns: list[dict]) -> str:
+    """50/100/200-day SMA positioning plus any Golden/Death Cross events
+    already detected in `patterns` (app.pattern_detection.detect_all runs
+    the crossover detector alongside the shape detectors) -- pulled out
+    here rather than recomputed, so this section and the Patterns section
+    can never disagree about whether a crossover happened."""
+    close = float(df["close"].iloc[-1])
+    sma50 = _last_valid(ind["sma_50"])
+    sma100 = _last_valid(ind["sma_100"])
+    sma200 = _last_valid(ind["sma_200"])
+
+    labeled = [(label, v) for label, v in [("50-day", sma50), ("100-day", sma100), ("200-day", sma200)] if v is not None]
+    if not labeled:
+        return "Not enough history in this window to compute the 50/100/200-day moving averages."
+
+    parts = [
+        "Price ($" + f"{close:.2f}) vs. " + ", ".join(f"{label} SMA ${v:.2f}" for label, v in labeled) + "."
+    ]
+
+    above = [label for label, v in labeled if close > v]
+    below = [label for label, v in labeled if close <= v]
+    if len(above) == len(labeled):
+        parts.append("Price is above all available long-term moving averages -- a broadly bullish stack.")
+    elif len(below) == len(labeled):
+        parts.append("Price is below all available long-term moving averages -- a broadly bearish stack.")
+    else:
+        parts.append(f"Price is above its {', '.join(above)} but below its {', '.join(below)} -- a mixed stack.")
+
+    if sma50 is not None and sma100 is not None and sma200 is not None:
+        if sma50 > sma100 > sma200:
+            parts.append("The averages are stacked 50 > 100 > 200, the order a sustained uptrend produces.")
+        elif sma50 < sma100 < sma200:
+            parts.append("The averages are stacked 50 < 100 < 200, the order a sustained downtrend produces.")
+        else:
+            parts.append("The averages aren't cleanly stacked in either order, consistent with a choppier or transitioning trend.")
+
+    crossovers = [p for p in patterns if p["name"] in ("Golden Cross", "Death Cross")]
+    if crossovers:
+        latest = max(crossovers, key=lambda p: p["end"])
+        parts.append(f"Most recent crossover: a {latest['name']} on {latest['end'].date()} ({latest['detail']}).")
+    else:
+        parts.append("No 50/200-day golden or death cross in this window.")
+
+    return " ".join(parts)
+
+
+def _describe_volume(vt: dict) -> str:
+    if not vt.get("available"):
+        return "Not enough history in this window to compute a volume trend read."
+
+    recent = vt["recent_avg_volume"]
+    baseline = vt["baseline_avg_volume"]
+    change_pct = vt.get("change_pct")
+    parts = [f"Recent average volume is {recent:,.0f} shares/bar vs. a {baseline:,.0f} baseline"]
+    if change_pct is not None:
+        direction = "up" if change_pct >= 0 else "down"
+        parts[-1] += f", {direction} {abs(change_pct):.0f}%."
+    else:
+        parts[-1] += "."
+
+    side = vt.get("dominant_side", "balanced")
+    ratio = vt.get("pressure_ratio")
+    if side == "buyers":
+        parts.append(
+            f"Average volume on up days has run {ratio:.2f}x average volume on down days -- "
+            "more participation on the up moves, read as buyers being the more active side."
+        )
+    elif side == "sellers":
+        parts.append(
+            f"Average volume on down days has run {1 / ratio:.2f}x average volume on up days -- "
+            "more participation on the down moves, read as sellers being the more active side."
+        )
+    else:
+        parts.append("Volume on up days and down days has been roughly balanced -- no clear buyer/seller edge by this measure.")
+
+    return " ".join(parts)
+
+
+def _describe_fibonacci(fib: dict) -> str:
+    swing_high = fib["swing_high"]
+    swing_low = fib["swing_low"]
+    levels_text = ", ".join(f"{lv['ratio']:.1%} = ${lv['price']:.2f}" for lv in fib["levels"])
+    return (
+        f"Fibonacci {fib['direction']} drawn from the window's swing low (${swing_low:.2f} on "
+        f"{fib['swing_low_time'].date()}) to its swing high (${swing_high:.2f} on {fib['swing_high_time'].date()}): "
+        f"{levels_text}. These are commonly-watched reference zones, not predictions that price reaches or reverses at any of them."
+    )
+
+
 def _describe_bands(df: pd.DataFrame, ind: dict) -> str:
     bb = ind["bollinger"].dropna()
     if bb.empty:
@@ -231,16 +320,22 @@ def _synthesize(trend_signal: str, momentum_signal: str, confirmed_patterns: lis
 
 def generate_summary(ticker: str, timeframe: str, df: pd.DataFrame, ind: dict, patterns: list[dict]) -> dict:
     trend_text, trend_signal = _describe_trend(df, ind, timeframe)
+    ma_text = _describe_moving_averages(df, ind, patterns)
     momentum_text, momentum_signal = _describe_momentum(ind)
     bands_text = _describe_bands(df, ind)
+    volume_text = _describe_volume(ind["volume_trend"])
+    fibonacci_text = _describe_fibonacci(ind["fibonacci"])
     patterns_text, confirmed_patterns = _describe_patterns(patterns)
     synthesis_text = _synthesize(trend_signal, momentum_signal, confirmed_patterns)
 
     return {
-        "headline": f"{ticker} technical read over {timeframe}",
+        "headline": f"{ticker} technical analysis report card -- {timeframe}",
         "trend": trend_text,
+        "moving_averages": ma_text,
         "momentum": momentum_text,
         "volatility": bands_text,
+        "volume": volume_text,
+        "fibonacci": fibonacci_text,
         "patterns": patterns_text,
         "synthesis": synthesis_text,
         "disclaimer": DISCLAIMER,
