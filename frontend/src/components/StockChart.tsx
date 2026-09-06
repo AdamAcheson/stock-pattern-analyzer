@@ -54,7 +54,7 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 720,
+      height: 900,
       layout: {
         background: { color: '#ffffff' },
         textColor: '#1f2937',
@@ -328,7 +328,7 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
     // `setStretchFactor` is the persistent, ratio-based sizing API and
     // is respected across layout passes.
     const panes = chart.panes();
-    panes[0]?.setStretchFactor(420);
+    panes[0]?.setStretchFactor(600);
     panes[1]?.setStretchFactor(120);
     panes[2]?.setStretchFactor(90);
     panes[3]?.setStretchFactor(90);
