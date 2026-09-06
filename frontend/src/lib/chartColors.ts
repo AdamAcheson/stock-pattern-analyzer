@@ -19,14 +19,19 @@ export const OVERLAY_COLORS = {
   signal: '#ea580c',
 } as const;
 
-export const OVERLAY_LEGEND: { label: string; color: string }[] = [
+// `dashed` mirrors each series' actual `lineStyle` in StockChart.tsx (2 =
+// dashed) -- Bollinger Bands and Fibonacci Levels are drawn dashed on the
+// chart, so the legend swatch needs to render dashed too, or it misleads
+// readers into expecting a solid line (caught by a user comparing the
+// legend swatch against the actual dashed line on the chart).
+export const OVERLAY_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
   { label: 'SMA 20', color: OVERLAY_COLORS.sma20 },
   { label: 'SMA 50', color: OVERLAY_COLORS.sma50 },
   { label: 'SMA 100', color: OVERLAY_COLORS.sma100 },
   { label: 'SMA 200', color: OVERLAY_COLORS.sma200 },
   { label: 'EMA 12', color: OVERLAY_COLORS.ema12 },
   { label: 'EMA 26', color: OVERLAY_COLORS.ema26 },
-  { label: 'Bollinger Bands', color: OVERLAY_COLORS.bollinger },
+  { label: 'Bollinger Bands', color: OVERLAY_COLORS.bollinger, dashed: true },
   { label: 'VWMA 20 (volume pane)', color: OVERLAY_COLORS.vwma20 },
-  { label: 'Fibonacci Levels', color: OVERLAY_COLORS.fibonacci },
+  { label: 'Fibonacci Levels', color: OVERLAY_COLORS.fibonacci, dashed: true },
 ];
