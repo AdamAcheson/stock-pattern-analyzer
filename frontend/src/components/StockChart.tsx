@@ -17,14 +17,23 @@ import type {
   PatternMatch,
 } from '../lib/api';
 import { isoToUtcSeconds, isIntradayTimeframe } from '../lib/time';
-import { OVERLAY_COLORS } from '../lib/chartColors';
+import { OVERLAY_COLORS, dimColor, type OverlayKey } from '../lib/chartColors';
 
 interface Props {
   ohlcv: OHLCVResponse;
   indicators: IndicatorsResponse;
   patterns: PatternsResponse;
   timeframe: string;
+  highlighted: OverlayKey | null;
 }
+
+// One entry per legend-hoverable overlay. `setState` captures whatever
+// series/price-lines make up that overlay and restyles them for the
+// current highlight state -- 'active' (this is the hovered one, drawn
+// bolder), 'dimmed' (something else is hovered, faded down so the active
+// one stands out), or 'normal' (nothing hovered, base style).
+type HighlightState = 'normal' | 'active' | 'dimmed';
+type HighlightEntry = { setState: (state: HighlightState) => void };
 
 const BULLISH_COLOR = '#16a34a';
 const BEARISH_COLOR = '#dc2626';
@@ -45,9 +54,10 @@ function toLinePoints(points: { time: string; value: number | null }[]) {
     .map((p) => ({ time: isoToUtcSeconds(p.time) as UTCTimestamp, value: p.value }));
 }
 
-export default function StockChart({ ohlcv, indicators, patterns, timeframe }: Props) {
+export default function StockChart({ ohlcv, indicators, patterns, timeframe, highlighted }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const highlightRegistryRef = useRef<Partial<Record<OverlayKey, HighlightEntry>>>({});
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -110,13 +120,34 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
     // every overlay series here is titled '' and identified instead by
     // the HTML/CSS legend in ChartLegend.tsx, which shares the same
     // color constants from lib/chartColors.ts.
-    const overlaySpecs: { data: IndicatorsResponse['sma_20']; color: string; lineWidth: 1 | 2 }[] = [
-      { data: indicators.sma_20, color: OVERLAY_COLORS.sma20, lineWidth: 1 },
-      { data: indicators.sma_50, color: OVERLAY_COLORS.sma50, lineWidth: 1 },
-      { data: indicators.sma_100, color: OVERLAY_COLORS.sma100, lineWidth: 1 },
-      { data: indicators.sma_200, color: OVERLAY_COLORS.sma200, lineWidth: 2 },
-      { data: indicators.ema_12, color: OVERLAY_COLORS.ema12, lineWidth: 1 },
-      { data: indicators.ema_26, color: OVERLAY_COLORS.ema26, lineWidth: 1 },
+    const registry = highlightRegistryRef.current;
+    // Reset each render -- the chart (and every series/price-line it
+    // holds) is torn down and rebuilt from scratch in this effect's
+    // cleanup/rerun, so stale entries from the previous data set would
+    // otherwise point at series that no longer exist.
+    for (const k of Object.keys(registry)) delete registry[k as OverlayKey];
+
+    // Bold the hovered overlay and fade every other one down to a faint
+    // tint of its own color, so the hovered line visually pops out of the
+    // otherwise-crowded price pane instead of just sitting in a legend.
+    function registerLine(key: OverlayKey, series: ReturnType<typeof chart.addSeries>, color: string, baseWidth: 1 | 2) {
+      registry[key] = {
+        setState: (state) => {
+          series.applyOptions({
+            color: state === 'dimmed' ? dimColor(color) : color,
+            lineWidth: state === 'active' ? ((Math.min(baseWidth + 1, 4)) as 1 | 2 | 3 | 4) : baseWidth,
+          });
+        },
+      };
+    }
+
+    const overlaySpecs: { key: OverlayKey; data: IndicatorsResponse['sma_20']; color: string; lineWidth: 1 | 2 }[] = [
+      { key: 'sma20', data: indicators.sma_20, color: OVERLAY_COLORS.sma20, lineWidth: 1 },
+      { key: 'sma50', data: indicators.sma_50, color: OVERLAY_COLORS.sma50, lineWidth: 1 },
+      { key: 'sma100', data: indicators.sma_100, color: OVERLAY_COLORS.sma100, lineWidth: 1 },
+      { key: 'sma200', data: indicators.sma_200, color: OVERLAY_COLORS.sma200, lineWidth: 2 },
+      { key: 'ema12', data: indicators.ema_12, color: OVERLAY_COLORS.ema12, lineWidth: 1 },
+      { key: 'ema26', data: indicators.ema_26, color: OVERLAY_COLORS.ema26, lineWidth: 1 },
     ];
     for (const spec of overlaySpecs) {
       const series = chart.addSeries(LineSeries, {
@@ -127,10 +158,14 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
         lastValueVisible: false,
       });
       series.setData(toLinePoints(spec.data));
+      registerLine(spec.key, series, spec.color, spec.lineWidth);
     }
 
     // Bollinger Bands: upper/lower as thin dashed lines, middle omitted
-    // (it's identical to SMA 20, already drawn above).
+    // (it's identical to SMA 20, already drawn above). Both lines are
+    // registered under the single 'bollinger' key so hovering the one
+    // legend entry highlights both.
+    const bollingerSeries: ReturnType<typeof chart.addSeries>[] = [];
     for (const key of ['upper', 'lower'] as const) {
       const series = chart.addSeries(LineSeries, {
         color: OVERLAY_COLORS.bollinger,
@@ -145,7 +180,18 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
           .filter((p) => p[key] !== null)
           .map((p) => ({ time: isoToUtcSeconds(p.time) as UTCTimestamp, value: p[key] as number })),
       );
+      bollingerSeries.push(series);
     }
+    registry.bollinger = {
+      setState: (state) => {
+        for (const series of bollingerSeries) {
+          series.applyOptions({
+            color: state === 'dimmed' ? dimColor(OVERLAY_COLORS.bollinger) : OVERLAY_COLORS.bollinger,
+            lineWidth: state === 'active' ? 2 : 1,
+          });
+        }
+      },
+    };
 
     // Support/resistance as horizontal price lines on the candle series.
     // No axis label here either, for the same collision reason as above
@@ -173,16 +219,28 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
 
     // Fibonacci retracement levels, same no-axis-label treatment as
     // support/resistance -- exact prices are listed in the Fibonacci
-    // report-card section instead.
-    for (const level of indicators.fibonacci.levels) {
+    // report-card section instead. Price lines (unlike series) support
+    // `applyOptions` directly on the handle `createPriceLine` returns, so
+    // highlighting them needs no separate series bookkeeping.
+    const fibonacciLines = indicators.fibonacci.levels.map((level) =>
       candleSeries.createPriceLine({
         price: level.price,
         color: OVERLAY_COLORS.fibonacci,
         lineWidth: 1,
         lineStyle: 2, // dashed
         axisLabelVisible: false,
-      });
-    }
+      }),
+    );
+    registry.fibonacci = {
+      setState: (state) => {
+        for (const line of fibonacciLines) {
+          line.applyOptions({
+            color: state === 'dimmed' ? dimColor(OVERLAY_COLORS.fibonacci) : OVERLAY_COLORS.fibonacci,
+            lineWidth: state === 'active' ? 2 : 1,
+          });
+        }
+      },
+    };
 
     // Pattern markers: one at the pattern's start, one at its end (or,
     // if confirmed, at the actual breakout date instead of the shape's
@@ -250,6 +308,7 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
     );
     vwmaSeries.setData(toLinePoints(indicators.vwma_20));
     chart.priceScale('vwma', 1).applyOptions({ visible: false });
+    registerLine('vwma20', vwmaSeries, OVERLAY_COLORS.vwma20, 1);
 
     // ---- Pane 2: RSI ----
     // Only 2 reference lines share this pane's own price scale (no other
@@ -335,6 +394,14 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
 
     chart.timeScale().fitContent();
 
+    // Apply whatever's currently hovered (usually nothing, on first
+    // paint) so a rebuild triggered while the user is mid-hover -- e.g.
+    // switching timeframe -- doesn't silently drop back to the unhighlighted
+    // style until the mouse re-enters the legend.
+    for (const key of Object.keys(registry) as OverlayKey[]) {
+      registry[key]?.setState(highlighted === null ? 'normal' : highlighted === key ? 'active' : 'dimmed');
+    }
+
     const handleResize = () => {
       if (containerRef.current) {
         chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -349,6 +416,16 @@ export default function StockChart({ ohlcv, indicators, patterns, timeframe }: P
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ohlcv, indicators, patterns, timeframe]);
+
+  // Runs independently of the chart-rebuild effect above so hovering a
+  // legend entry restyles the existing series in place instead of tearing
+  // down and recreating the whole chart on every mouse move.
+  useEffect(() => {
+    const registry = highlightRegistryRef.current;
+    for (const key of Object.keys(registry) as OverlayKey[]) {
+      registry[key]?.setState(highlighted === null ? 'normal' : highlighted === key ? 'active' : 'dimmed');
+    }
+  }, [highlighted]);
 
   return <div ref={containerRef} style={{ width: '100%' }} />;
 }

@@ -1,10 +1,20 @@
-import { OVERLAY_LEGEND } from '../lib/chartColors';
+import { OVERLAY_LEGEND, type OverlayKey } from '../lib/chartColors';
 
-export default function ChartLegend() {
+interface Props {
+  hovered: OverlayKey | null;
+  onHover: (key: OverlayKey | null) => void;
+}
+
+export default function ChartLegend({ hovered, onHover }: Props) {
   return (
     <div className="chart-legend">
       {OVERLAY_LEGEND.map((item) => (
-        <span key={item.label} className="legend-item">
+        <span
+          key={item.label}
+          className={`legend-item${hovered === item.key ? ' legend-item-active' : ''}`}
+          onMouseEnter={() => onHover(item.key)}
+          onMouseLeave={() => onHover(null)}
+        >
           <span
             className="legend-swatch"
             style={

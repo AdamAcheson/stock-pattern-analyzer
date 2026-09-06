@@ -119,6 +119,15 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  cursor: default;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+
+.legend-item-active {
+  background: #f1f5f9;
+  color: #111827;
+  font-weight: 600;
 }
 
 .legend-swatch {

@@ -19,6 +19,7 @@ import PatternList from './components/PatternList';
 import ChartLegend from './components/ChartLegend';
 import KeyLevels from './components/KeyLevels';
 import SummaryPanel from './components/SummaryPanel';
+import type { OverlayKey } from './lib/chartColors';
 import './App.css';
 
 interface LoadedData {
@@ -43,6 +44,7 @@ function App() {
   const [data, setData] = useState<LoadedData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hoveredOverlay, setHoveredOverlay] = useState<OverlayKey | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,12 +133,13 @@ function App() {
           </section>
 
           <section className="chart-section">
-            <ChartLegend />
+            <ChartLegend hovered={hoveredOverlay} onHover={setHoveredOverlay} />
             <StockChart
               ohlcv={data.ohlcv}
               indicators={data.indicators}
               patterns={data.patterns}
               timeframe={timeframe}
+              highlighted={hoveredOverlay}
             />
           </section>
 
